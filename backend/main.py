@@ -46,7 +46,18 @@ def trading_loop():
     ciclo = 0
     while True:
         print(f"\n⏳ Ciclo: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        precios = binance.get_current_prices(settings.CRYPTO_LIST)
+
+        try:
+            precios = binance.get_current_prices(settings.CRYPTO_LIST)
+        except Exception as e:
+            print(f"❌ Binance bloqueado o error en API: {e}")
+            precios = {}
+
+        if not precios:
+            print("⚠️ No se pudo obtener precios, se omite el ciclo.")
+            time.sleep(settings.WAIT_TIME)
+            continue
+
         simulator.latest_decisions = {}  # Reiniciar decisiones
 
         for i, symbol in enumerate(settings.CRYPTO_LIST):
@@ -65,6 +76,7 @@ def trading_loop():
         ciclo += 1
         if ciclo % 12 == 0:
             simulator.show_summary(precios)
+
         time.sleep(settings.WAIT_TIME)
 
 threading.Thread(target=trading_loop, daemon=True).start()
@@ -100,6 +112,7 @@ def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
 @app.get("/balance")
 def get_balance():
     try:
+        binance.init_client()
         balance_info = binance.client.get_asset_balance(asset="USDT")
         return {"usdt": balance_info.get("free")}
     except Exception as e:
