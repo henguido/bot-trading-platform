@@ -1,0 +1,342 @@
+[2025-04-28 14:40:12] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,647.99
+    - Capital disponible: $1,000.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 15:22:59] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,367.79
+    - Capital disponible: $1,000.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 15:31:45] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,418.56
+    - Capital disponible: $1,000.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 15:43:25] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,369.40
+    - Capital disponible: $1,000.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:28:25] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,512.34
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:28:46] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,793.89
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:29:06] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $147.25
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:29:27] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $604.95
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:29:48] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:32:56] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,502.72
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:33:17] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,792.10
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:33:38] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $147.20
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:33:59] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $605.01
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:34:20] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:34:41] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.73
+    - Capital disponible: $10.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:50:53] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,823.51
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:51:14] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,801.99
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:51:35] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $148.10
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:51:56] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $605.75
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:52:17] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 16:52:38] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.83
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:11:54] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,970.01
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:12:15] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,799.05
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:12:35] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $147.78
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:12:56] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $605.81
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:13:17] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 17:13:38] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.81
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:47:58] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $95,046.73
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:48:19] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,799.76
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:48:40] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $148.08
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:49:00] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $606.82
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:49:21] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 18:49:41] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.92
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:35:24] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $95,158.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:35:48] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,800.55
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:36:08] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $148.32
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:36:29] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $605.88
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:36:49] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 19:37:10] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.95
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:38:07] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,904.75
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:38:27] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,801.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:38:48] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $147.92
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:39:09] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $605.19
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:39:30] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-28 20:39:50] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.84
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:42:40] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $95,165.92
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:43:00] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,821.88
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:43:21] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $148.07
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:43:42] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $603.24
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:44:02] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 08:44:23] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $22.17
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:03:30] Análisis BTCUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $94,860.50
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:03:51] Análisis ETHUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $1,816.08
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:04:12] Análisis SOLUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $148.02
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:04:32] Análisis BNBUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $601.23
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:04:53] Análisis MATICUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $0.00
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
+[2025-04-29 10:05:15] Análisis AVAXUSDT:
+    - Decisión: ESPERAR
+    - Precio actual: $21.98
+    - Capital disponible: $20.00
+    - Cantidad invertida: 0.000000 unidades
+
