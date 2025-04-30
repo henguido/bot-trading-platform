@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 sqlalchemy
-psycopg2-binary
-python-jose
-passlib[bcrypt]
 python-dotenv
-email-validator
+python-binance
+aiohttp
+cryptography
+requests
+passlib[bcrypt]
+python-jose[cryptography]

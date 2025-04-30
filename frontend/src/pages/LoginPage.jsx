@@ -5,11 +5,14 @@ function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMsg("");
+    setLoading(true);
 
     try {
       const response = await fetch("https://bot-trading-backend.onrender.com/login", {
@@ -28,49 +31,82 @@ function LoginPage() {
       navigate("/dashboard");
     } catch (err) {
       setErrorMsg(err.message || "Ocurrió un error");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600 p-4">
       <form
         onSubmit={handleLogin}
-        className="bg-white shadow-md rounded px-8 pt-6 pb-8 w-full max-w-md"
+        className="bg-white shadow-lg rounded-xl px-8 pt-8 pb-10 w-full max-w-md animate-fade-in"
       >
-        <h2 className="text-2xl font-bold mb-6 text-center">Iniciar Sesión</h2>
+        <h2 className="text-3xl font-bold text-center text-gray-800 mb-6">
+          Iniciar Sesión
+        </h2>
 
         {errorMsg && (
-          <p className="mb-4 text-red-600 text-sm text-center">{errorMsg}</p>
+          <div className="bg-red-100 text-red-700 text-sm rounded p-3 mb-4 text-center border border-red-300">
+            {errorMsg}
+          </div>
         )}
 
         <div className="mb-4">
-          <label className="block text-gray-700 text-sm mb-2">Correo</label>
+          <label className="block text-gray-700 text-sm font-medium mb-1">
+            Correo Electrónico
+          </label>
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full border px-3 py-2 rounded focus:outline-none focus:ring"
+            className="w-full border border-gray-300 px-3 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="tucorreo@ejemplo.com"
           />
         </div>
 
-        <div className="mb-6">
-          <label className="block text-gray-700 text-sm mb-2">Contraseña</label>
+        <div className="mb-6 relative">
+          <label className="block text-gray-700 text-sm font-medium mb-1">
+            Contraseña
+          </label>
           <input
-            type="password"
+            type={showPassword ? "text" : "password"}
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full border px-3 py-2 rounded focus:outline-none focus:ring"
+            className="w-full border border-gray-300 px-3 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="••••••••"
           />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute top-9 right-3 text-sm text-blue-600"
+          >
+            {showPassword ? "Ocultar" : "Ver"}
+          </button>
         </div>
 
         <button
           type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+          disabled={loading}
+          className={`w-full ${
+            loading ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
+          } text-white font-bold py-2 px-4 rounded-lg transition duration-300`}
         >
-          Entrar
+          {loading ? "Entrando..." : "Entrar"}
         </button>
+
+        <p className="text-center text-sm text-gray-600 mt-4">
+          ¿No tenés cuenta?{" "}
+          <button
+            type="button"
+            onClick={() => navigate("/signup")}
+            className="text-blue-600 hover:underline font-medium"
+          >
+            Registrate aquí
+          </button>
+        </p>
       </form>
     </div>
   );

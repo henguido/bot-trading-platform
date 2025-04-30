@@ -1,19 +1,21 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { useState } from "react";
+import Navbar from "./components/Navbar";
+import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
-import DashboardPage from "./pages/DashboardPage";
 
 function App() {
+  const [page, setPage] = useState("dashboard");
+
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="*" element={<div className="text-center p-10">404 - Página no encontrada</div>} />
-      </Routes>
-    </Router>
+    <div>
+      <Navbar onNavigate={setPage} />
+      <main className="p-4">
+        {page === "dashboard" && <DashboardPage />}
+        {page === "login" && <LoginPage />}
+        {page === "signup" && <SignupPage />}
+      </main>
+    </div>
   );
 }
 
