@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas, auth
 from app.database import engine, SessionLocal
 from app.auth import get_password_hash, verify_password, create_access_token, get_db
-from binance_api.binance_connector import BinanceConnector
-from openai_api.openai_connector import OpenAIConnector
+from connectors.apis.binance_connector import BinanceConnector
+from connectors.apis.openai_connector import OpenAIConnector
 from simulation.simulator import Simulator
 from config import settings
 import threading, time, datetime
