@@ -1,39 +1,33 @@
-# binance_api/binance_connector.py
-
 from binance.client import Client
 from config import settings
 
 class BinanceConnector:
     def __init__(self):
-        self.client = Client(settings.BINANCE_API_KEY, settings.BINANCE_API_SECRET)
+        self.api_key = settings.BINANCE_API_KEY
+        self.api_secret = settings.BINANCE_API_SECRET
+        self.client = None  # ❗ Se inicializa luego
 
-    def get_current_data(self, symbols):
-        """
-        Obtiene el precio actual y el % de cambio 24h de una lista de criptos.
-        Retorna un diccionario:
-        {
-            'BTCUSDT': {'price': 63000, 'price_change_percent': 2.5},
-            'ETHUSDT': {'price': 3200, 'price_change_percent': -1.2},
-            ...
-        }
-        """
-        data = {}
+    def init_client(self):
+        if not self.client:
+            self.client = Client(self.api_key, self.api_secret)
+
+    def get_current_prices(self, symbols):
+        self.init_client()
+        prices = {}
         try:
             for symbol in symbols:
-                ticker = self.client.get_ticker(symbol=symbol)
-                data[symbol] = {
-                    'price': float(ticker['lastPrice']),
-                    'price_change_percent': float(ticker['priceChangePercent'])
-                }
+                ticker = self.client.get_symbol_ticker(symbol=symbol)
+                prices[symbol] = float(ticker['price'])
         except Exception as e:
-            print(f"Error obteniendo datos de Binance: {e}")
-        return data
+            print(f"⚠️ Error obteniendo precios de Binance: {e}")
+        return prices
 
     def test_connection(self):
+        self.init_client()
         try:
             status = self.client.ping()
-            print("Conexión a Binance exitosa:", status)
+            print("✅ Conexión a Binance exitosa:", status)
             return True
         except Exception as e:
-            print(f"Error al conectar con Binance: {e}")
+            print(f"❌ Error al conectar con Binance: {e}")
             return False
