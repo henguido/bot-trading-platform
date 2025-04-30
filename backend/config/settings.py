@@ -32,7 +32,7 @@ MODO_REAL = True                  # True = Trading real en Binance / False = Sim
 MONTO_MAXIMO_USDT = 20             # Monto máximo para cada operación real (en dólares)
 
 # 💰 Capital inicial para modo simulador
-INITIAL_CAPITAL_USDT = 20        # Solo usado si MODO_REAL = False
+INITIAL_CAPITAL_USD = 20         # Solo usado si MODO_REAL = False
 
 # 🌍 Configuración del servidor FastAPI
 API_HOST = "0.0.0.0"
