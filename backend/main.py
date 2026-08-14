@@ -22,10 +22,13 @@ from backend.app.services.real_trading import (
     guardar_auditoria_decision,
     obtener_ultimo_precio_venta,
     cargar_contexto_usuario,
+    ejecutar_y_registrar_compra,
+    ejecutar_y_registrar_venta,
 )
 from backend.routes import transacciones_routes, binance_routes
 from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
+from backend.app.services.ordenes import es_cantidad_valida, validar_peticion_venta
 import time
 import threading, pytz, traceback
 
@@ -82,6 +85,20 @@ real_trader = RealTradingConnector()
 
 def priorizar_activos_por_importancia(activos):
     return [a for a in activos if a["position_quantity"] > 0]
+
+def posicion_disponible(symbol, saldo_real_dict):
+    """
+    Cantidad de ACTIVO BASE disponible para vender, en las unidades correctas.
+
+    En LIVE manda el saldo real del exchange; en PAPER, el libro en memoria del
+    simulador. Nunca se mezclan: una posicion simulada no autoriza una venta
+    real, ni al reves.
+    """
+    if settings.MODO_REAL:
+        return float(saldo_real_dict.get(symbol.replace("USDT", ""), 0.0))
+    posicion = simulator.positions.get(symbol)
+    return float(posicion.quantity) if posicion else 0.0
+
 
 def get_min_notional(symbol, filters_dict):
     symbol_filters = filters_dict.get(symbol)
@@ -326,7 +343,8 @@ def trading_loop():
             for resultado in resultados:
                 symbol = resultado.get("symbol")
                 decision = resultado.get("decision", "ESPERAR")
-                quantity = resultado.get("quantity", 0.0)
+                # GPT devuelve la cantidad en ACTIVO BASE (BTC en BTCUSDT).
+                base_quantity = resultado.get("quantity", 0.0)
                 risk_score = resultado.get("risk_score", 0.0)
 
                 if not symbol:
@@ -338,38 +356,58 @@ def trading_loop():
                     continue
 
                 if decision == "COMPRAR":
-                    print(f"🚀 COMPRA de {symbol} a {precio_actual}")
-                    
-                    notional = precio_actual * quantity
-                    min_notional = get_min_notional(symbol, filters_dict)
+                    if not es_cantidad_valida(base_quantity):
+                        print(f"⛔ COMPRA {symbol} descartada: base_quantity invalida "
+                              f"({base_quantity!r})")
+                        continue
 
-                    if notional < min_notional:
-                        print(f"⚠️ Orden ignorada: NOTIONAL ${notional:.6f} menor a mínimo requerido ${min_notional:.2f} para {symbol}")
+                    quote_amount = precio_actual * base_quantity  # USDT a invertir
+                    min_notional = get_min_notional(symbol, filters_dict)
+                    if quote_amount < min_notional:
+                        print(f"⚠️ Orden ignorada: notional ${quote_amount:.6f} menor al "
+                              f"minimo ${min_notional:.2f} para {symbol}")
                         continue
 
                     if settings.MODO_REAL:
-                        try:
-                            real_trader.comprar(symbol, cantidad_usdt=precio_actual * quantity)
-                            simulator.simulate_trade(symbol, "COMPRAR", precio_actual, quantity)
-                            with SessionLocal() as db:
-                                guardar_transaccion_real(db, usuario_id=contexto.usuario_id, symbol=symbol, action="COMPRAR", price=precio_actual, quantity=quantity)
-                        except Exception as e:
-                            print(f"⚠️ Error en compra real: {e}")
+                        # LIVE: persiste solo tras confirmacion del broker. Si
+                        # falla, NO se persiste y NO se simula: una orden real
+                        # fallida no puede convertirse en operacion registrada.
+                        ejecucion = ejecutar_y_registrar_compra(
+                            trader=real_trader, usuario_id=contexto.usuario_id,
+                            symbol=symbol, quote_amount=quote_amount,
+                            precio_referencia=precio_actual,
+                        )
+                        if not ejecucion.success:
+                            print(f"⛔ COMPRA {symbol} NO registrada: {ejecucion}")
                     else:
-                        simulator.simulate_trade(symbol, "COMPRAR", precio_actual, quantity)
+                        # PAPER: solo el libro en memoria. Nunca toca la BD.
+                        simulator.simulate_trade(symbol, "COMPRAR", precio_actual, base_quantity)
 
                 elif decision == "VENDER":
-                    print(f"🔻 VENTA de {symbol} a {precio_actual}")
+                    if not es_cantidad_valida(base_quantity):
+                        print(f"⛔ VENTA {symbol} descartada: base_quantity invalida "
+                              f"({base_quantity!r})")
+                        continue
+
+                    disponible = posicion_disponible(symbol, saldo_real_dict)
+                    motivo = validar_peticion_venta(symbol, base_quantity, disponible=disponible)
+                    if motivo:
+                        print(f"⛔ VENTA {symbol} descartada: {motivo}")
+                        continue
+
                     if settings.MODO_REAL:
-                        try:
-                            real_trader.vender(symbol, cantidad_usdt=precio_actual * quantity)
-                            simulator.simulate_trade(symbol, "VENDER", precio_actual, quantity)
-                            with SessionLocal() as db:
-                                guardar_transaccion_real(db, usuario_id=contexto.usuario_id, symbol=symbol, action="VENDER", price=precio_actual, quantity=quantity)
-                        except Exception as e:
-                            print(f"⚠️ Error en venta real: {e}")
+                        # base_quantity va tal cual: es cantidad de activo base.
+                        # Pasar precio_actual * base_quantity venderia el importe
+                        # en USDT interpretado como BTC (bug P0-1).
+                        ejecucion = ejecutar_y_registrar_venta(
+                            trader=real_trader, usuario_id=contexto.usuario_id,
+                            symbol=symbol, base_quantity=base_quantity,
+                            precio_referencia=precio_actual,
+                        )
+                        if not ejecucion.success:
+                            print(f"⛔ VENTA {symbol} NO registrada: {ejecucion}")
                     else:
-                        simulator.simulate_trade(symbol, "VENDER", precio_actual, quantity)
+                        simulator.simulate_trade(symbol, "VENDER", precio_actual, base_quantity)
 
                 elif decision == "ESPERAR":
                     # En modo real, también considerar si hay saldo real
@@ -387,7 +425,9 @@ def trading_loop():
                     "symbol": symbol,
                     "action": decision,
                     "price": precio_actual,
-                    "quantity": quantity,
+                    # Cantidad DECIDIDA por GPT, en activo base. Es la intencion,
+                    # no una ejecucion: la auditoria registra decisiones.
+                    "quantity": base_quantity,
                     "timestamp": ahora.astimezone(pytz.timezone("America/Costa_Rica")).strftime("%Y-%m-%d %H:%M:%S"),
 
                     "context": {
@@ -405,7 +445,7 @@ def trading_loop():
                             db,
                             symbol=symbol,
                             action=decision,
-                            quantity=quantity,
+                            quantity=base_quantity,
                             price=precio_actual,
                             sentimiento=sentimiento,
                             noticias=noticias_str,

@@ -96,6 +96,54 @@ def guardar_transaccion_real(db: Session, usuario_id: int, symbol: str, action: 
     db.refresh(transaccion)
     return transaccion
 
+def ejecutar_y_registrar_compra(*, trader, usuario_id, symbol, quote_amount,
+                                precio_referencia=None, session_factory=SessionLocal):
+    """
+    COMPRA en LIVE. Persiste UNICAMENTE si el broker confirma la ejecucion.
+
+        senal -> intento de orden -> respuesta -> validacion del fill
+              -> persistencia
+
+    `quote_amount` es el importe del activo COTIZADO (USDT en BTCUSDT).
+    Devuelve el ResultadoOrden del conector, tanto si se persistio como si no.
+    """
+    ejecucion = trader.comprar(symbol, quote_amount=quote_amount)
+
+    if not ejecucion.success:
+        # Ni transaccion ni simulacion: la operacion no ocurrio.
+        return ejecucion
+
+    with session_factory() as db:
+        guardar_transaccion_real(
+            db, usuario_id=usuario_id, symbol=symbol, action="COMPRAR",
+            price=ejecucion.average_fill_price or precio_referencia,
+            quantity=ejecucion.executed_base_quantity,
+        )
+    return ejecucion
+
+
+def ejecutar_y_registrar_venta(*, trader, usuario_id, symbol, base_quantity,
+                               precio_referencia=None, session_factory=SessionLocal):
+    """
+    VENTA en LIVE. Persiste UNICAMENTE si el broker confirma la ejecucion.
+
+    `base_quantity` es cantidad del activo BASE (BTC en BTCUSDT). Nunca se le
+    pasa precio * cantidad: eso seria un importe en USDT (bug P0-1).
+    """
+    ejecucion = trader.vender(symbol, base_quantity=base_quantity)
+
+    if not ejecucion.success:
+        return ejecucion
+
+    with session_factory() as db:
+        guardar_transaccion_real(
+            db, usuario_id=usuario_id, symbol=symbol, action="VENDER",
+            price=ejecucion.average_fill_price or precio_referencia,
+            quantity=ejecucion.executed_base_quantity,
+        )
+    return ejecucion
+
+
 def cargar_estado_portafolio(db: Session, usuario_id: int) -> Dict[str, Dict[str, float]]:
     posiciones = {}
 
