@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
+from sqlalchemy import (Column, Integer, String, Float, ForeignKey, DateTime,
+                        UniqueConstraint)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.app.database import Base
@@ -43,9 +44,80 @@ class Transaction(Base):
     cantidad = Column(Float)
     precio = Column(Float)
     fecha_operacion = Column(DateTime, default=datetime.utcnow)
+    # Origen economico de la transaccion. UNIQUE para que un mismo fill no
+    # pueda generar dos apuntes. NULL en las transacciones legacy, anteriores
+    # al sistema de ordenes; UNIQUE admite multiples NULL.
+    fill_id = Column(Integer, ForeignKey("fills.id"), unique=True, nullable=True)
 
     portafolio = relationship("Portfolio", back_populates="transacciones")
     activo = relationship("Asset")  # ✅ Añadir esta línea
+
+class Orden(Base):
+    """
+    Intencion de operar. Se persiste ANTES de enviar nada al broker (P0-11).
+
+    Es la unica forma de poder preguntar despues "que paso con ESTA orden"
+    cuando se pierde la respuesta. `client_order_id` es UNIQUE: dos procesos no
+    pueden registrar la misma orden, y reintentar no crea una segunda.
+    """
+    __tablename__ = "ordenes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_order_id = Column(String(64), unique=True, nullable=False, index=True)
+    broker = Column(String(32), nullable=False, default="binance")
+    broker_order_id = Column(String(64), nullable=True, index=True)
+
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True, index=True)
+    decision_audit_id = Column(Integer, ForeignKey("decision_audit.id"), nullable=True)
+
+    symbol = Column(String(32), nullable=False, index=True)
+    side = Column(String(8), nullable=False)          # BUY | SELL
+
+    requested_base_quantity = Column(Float, nullable=True)
+    requested_quote_amount = Column(Float, nullable=True)
+    executed_base_quantity = Column(Float, nullable=False, default=0.0)
+    executed_quote_amount = Column(Float, nullable=False, default=0.0)
+
+    estado = Column(String(32), nullable=False, index=True)
+    error = Column(Text, nullable=True)
+
+    creada_en = Column(DateTime, default=datetime.utcnow, nullable=False)
+    actualizada_en = Column(DateTime, default=datetime.utcnow,
+                            onupdate=datetime.utcnow, nullable=False)
+
+    fills = relationship("Fill", back_populates="orden")
+
+
+class Fill(Base):
+    """
+    Ejecucion parcial o total confirmada por el broker.
+
+    La identidad externa (broker, symbol, trade_id) es UNIQUE: procesar el mismo
+    fill cien veces deja una sola fila. Es lo que hace idempotente al
+    reconciliador a nivel de BASE DE DATOS, no solo de codigo Python.
+    """
+    __tablename__ = "fills"
+    __table_args__ = (
+        UniqueConstraint("broker", "symbol", "trade_id", name="uq_fill_externo"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    orden_id = Column(Integer, ForeignKey("ordenes.id"), nullable=False, index=True)
+
+    broker = Column(String(32), nullable=False, default="binance")
+    symbol = Column(String(32), nullable=False)
+    trade_id = Column(String(64), nullable=False)
+
+    price = Column(Float, nullable=False)
+    qty = Column(Float, nullable=False)
+    # Tal cual lo informa el broker. Nunca se deduce una tasa.
+    commission = Column(Float, nullable=True)
+    commission_asset = Column(String(16), nullable=True)
+
+    registrado_en = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    orden = relationship("Orden", back_populates="fills")
+
 
 class DecisionAudit(Base):
     __tablename__ = "decision_audit"

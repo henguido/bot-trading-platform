@@ -70,10 +70,12 @@ class ClienteBinanceFalso:
             raise self.excepcion
         return self.respuesta
 
-    def order_market_buy(self, symbol, quantity):
+    def order_market_buy(self, symbol, quantity, newClientOrderId=None):
+        self.ultimo_client_order_id = newClientOrderId
         return self._orden("BUY", symbol, quantity)
 
-    def order_market_sell(self, symbol, quantity):
+    def order_market_sell(self, symbol, quantity, newClientOrderId=None):
+        self.ultimo_client_order_id = newClientOrderId
         return self._orden("SELL", symbol, quantity)
 
 
@@ -102,12 +104,14 @@ class TraderFalso:
         self.resultado_venta = resultado_venta
         self.llamadas = []
 
-    def comprar(self, symbol, quote_amount):
+    def comprar(self, symbol, quote_amount, client_order_id=None):
         self.llamadas.append(("comprar", symbol, {"quote_amount": quote_amount}))
+        self.ultimo_cid = client_order_id
         return self.resultado_compra
 
-    def vender(self, symbol, base_quantity):
+    def vender(self, symbol, base_quantity, client_order_id=None):
         self.llamadas.append(("vender", symbol, {"base_quantity": base_quantity}))
+        self.ultimo_cid = client_order_id
         return self.resultado_venta
 
 
@@ -230,7 +234,11 @@ def test_excepcion_del_broker_no_rompe_el_flujo_ni_persiste(fabrica_sesiones, us
     res = ejecutar_y_registrar_compra(trader=conector, usuario_id=usuario, symbol=SIMBOLO,
                                       quote_amount=100.0, session_factory=fabrica_sesiones)
 
-    assert res.estado is EstadoOrden.ERROR, "el fallo debe quedar representado, no tragado"
+    # P0-10: la excepcion ocurre durante el POST, asi que la orden PUDO llegar.
+    assert res.estado is EstadoOrden.ESTADO_DESCONOCIDO, \
+        "un fallo tras enviar no puede darse por no ejecutado"
+    assert res.estado is not EstadoOrden.NO_EJECUTADA
+    assert res.client_order_id, "debe conservarse la identidad para reconciliar"
     assert res.success is False
     assert "ConnectionError" in res.error and "timeout" in res.error
     assert contar_transacciones(fabrica_sesiones) == 0
@@ -483,11 +491,12 @@ def test_regresion_p0_2_main_solo_persiste_tras_confirmacion():
 # LECTURA DE LA RESPUESTA DEL BROKER
 # ═════════════════════════════════════════════════════════════════════════════
 @pytest.mark.parametrize("respuesta,estado", [
-    (None, EstadoOrden.ERROR),
-    ("texto", EstadoOrden.ERROR),
-    ({"status": "FILLED", "executedQty": "abc"}, EstadoOrden.ERROR),
-    ({"status": "EXPIRED", "executedQty": "0"}, EstadoOrden.RECHAZADA),
-    ({"status": "CANCELED", "executedQty": "0"}, EstadoOrden.RECHAZADA),
+    # Sin respuesta legible no podemos afirmar que no se ejecuto.
+    (None, EstadoOrden.ESTADO_DESCONOCIDO),
+    ("texto", EstadoOrden.ESTADO_DESCONOCIDO),
+    ({"status": "FILLED", "executedQty": "abc"}, EstadoOrden.ESTADO_DESCONOCIDO),
+    ({"status": "EXPIRED", "executedQty": "0"}, EstadoOrden.EXPIRADA),
+    ({"status": "CANCELED", "executedQty": "0"}, EstadoOrden.CANCELADA),
     ({"status": "NEW", "executedQty": "0"}, EstadoOrden.NO_EJECUTADA),
     ({}, EstadoOrden.NO_EJECUTADA),
 ])

@@ -5,9 +5,11 @@ from backend.config import settings
 from backend.app.services.ordenes import (
     Lado,
     bloqueada_paper,
-    error_tecnico,
+    error_pre_envio,
     es_cantidad_valida,
+    estado_desconocido,
     interpretar_respuesta_binance,
+    nuevo_client_order_id,
     rechazada,
     validar_peticion_compra,
     validar_peticion_venta,
@@ -59,7 +61,28 @@ class RealTradingConnector:
     def _round_to_step(self, quantity, step):
         return round(quantity - (quantity % step), 6)
 
-    def comprar(self, symbol, quote_amount):
+    def consultar_orden(self, symbol, client_order_id):
+        """
+        Pregunta al broker por NUESTRA identidad de orden. Es la unica forma de
+        resolver un ESTADO_DESCONOCIDO sin arriesgarse a duplicar.
+
+        Devuelve el dict del broker, o None si el broker no conoce esa orden
+        (lo que demuestra que nunca llego a crearse).
+        """
+        try:
+            return self._asegurar_cliente().get_order(
+                symbol=symbol, origClientOrderId=client_order_id)
+        except Exception as e:
+            if "does not exist" in str(e).lower() or "-2013" in str(e):
+                return None
+            raise
+
+    def consultar_fills(self, symbol, broker_order_id):
+        """Trades reales de una orden, con su comision tal y como la informa Binance."""
+        trades = self._asegurar_cliente().get_my_trades(symbol=symbol)
+        return [t for t in trades if str(t.get("orderId")) == str(broker_order_id)]
+
+    def comprar(self, symbol, quote_amount, client_order_id=None):
         """
         Compra a mercado gastando `quote_amount` del activo COTIZADO.
 
@@ -79,12 +102,17 @@ class RealTradingConnector:
         if not self._guard_live(f"COMPRA {symbol}"):
             return bloqueada_paper(symbol, lado, quote_amount=quote_amount)
 
+        cid = client_order_id or nuevo_client_order_id()
+
+        # ── FASE PRE-ENVIO ──────────────────────────────────────────────────
+        # Si algo falla aqui, el POST no llego a construirse: no existe ninguna
+        # orden en el broker y el estado terminal es seguro.
         try:
             ticker = self._asegurar_cliente().get_symbol_ticker(symbol=symbol)
             precio_actual = float(ticker["price"])
             if not es_cantidad_valida(precio_actual):
                 return rechazada(symbol, lado, f"precio invalido del broker: {precio_actual!r}",
-                                 quote_amount=quote_amount)
+                                 quote_amount=quote_amount, client_order_id=cid)
 
             step = self._get_step_size(symbol)
             # quote -> base. Es la unica conversion de unidad de todo el flujo.
@@ -93,21 +121,32 @@ class RealTradingConnector:
                 return rechazada(symbol, lado,
                                  f"tras redondear al step size la cantidad base quedo en "
                                  f"{base_quantity!r}; el importe es demasiado pequeno",
-                                 quote_amount=quote_amount)
-
-            respuesta = self._asegurar_cliente().order_market_buy(symbol=symbol, quantity=base_quantity)
-
+                                 quote_amount=quote_amount, client_order_id=cid)
         except Exception as e:
-            print(f"[ORDEN] COMPRA {symbol} ERROR: {type(e).__name__}: {e}")
-            return error_tecnico(symbol, lado, f"{type(e).__name__}: {e}",
-                                 quote_amount=quote_amount)
+            print(f"[ORDEN] COMPRA {symbol} ERROR_PRE_ENVIO: {type(e).__name__}: {e}")
+            return error_pre_envio(symbol, lado, f"{type(e).__name__}: {e}",
+                                   quote_amount=quote_amount, client_order_id=cid)
+
+        # ── FASE DE ENVIO ───────────────────────────────────────────────────
+        # A partir de aqui el POST puede haber llegado al broker. Cualquier
+        # fallo produce ESTADO_DESCONOCIDO, NUNCA NO_EJECUTADA. Sin reintentos:
+        # reenviar una orden que pudo llegar duplicaria exposicion.
+        try:
+            respuesta = self._asegurar_cliente().order_market_buy(
+                symbol=symbol, quantity=base_quantity, newClientOrderId=cid)
+        except Exception as e:
+            print(f"[ORDEN] COMPRA {symbol} ESTADO_DESCONOCIDO tras enviar: "
+                  f"{type(e).__name__}: {e}. Requiere reconciliacion por cid={cid}")
+            return estado_desconocido(symbol, lado, f"{type(e).__name__}: {e}",
+                                      quote_amount=quote_amount, client_order_id=cid)
 
         resultado = interpretar_respuesta_binance(respuesta, symbol, lado,
-                                                  quote_amount=quote_amount)
+                                                  quote_amount=quote_amount,
+                                                  client_order_id=cid)
         print(f"[ORDEN] {resultado}")
         return resultado
 
-    def vender(self, symbol, base_quantity):
+    def vender(self, symbol, base_quantity, client_order_id=None):
         """
         Vende a mercado `base_quantity` unidades del activo BASE.
 
@@ -126,23 +165,33 @@ class RealTradingConnector:
         if not self._guard_live(f"VENTA {symbol}"):
             return bloqueada_paper(symbol, lado, base_quantity=base_quantity)
 
-        try:
+        cid = client_order_id or nuevo_client_order_id()
+
+        try:  # ── PRE-ENVIO: ningun POST pudo salir todavia ─────────────────
             step = self._get_step_size(symbol)
             cantidad = self._round_to_step(base_quantity, step)
             if not es_cantidad_valida(cantidad):
                 return rechazada(symbol, lado,
                                  f"tras redondear al step size la cantidad base quedo en "
-                                 f"{cantidad!r}", base_quantity=base_quantity)
-
-            respuesta = self._asegurar_cliente().order_market_sell(symbol=symbol, quantity=cantidad)
-
+                                 f"{cantidad!r}", base_quantity=base_quantity,
+                                 client_order_id=cid)
         except Exception as e:
-            print(f"[ORDEN] VENTA {symbol} ERROR: {type(e).__name__}: {e}")
-            return error_tecnico(symbol, lado, f"{type(e).__name__}: {e}",
-                                 base_quantity=base_quantity)
+            print(f"[ORDEN] VENTA {symbol} ERROR_PRE_ENVIO: {type(e).__name__}: {e}")
+            return error_pre_envio(symbol, lado, f"{type(e).__name__}: {e}",
+                                   base_quantity=base_quantity, client_order_id=cid)
+
+        try:  # ── ENVIO: el POST puede haber llegado ─────────────────────────
+            respuesta = self._asegurar_cliente().order_market_sell(
+                symbol=symbol, quantity=cantidad, newClientOrderId=cid)
+        except Exception as e:
+            print(f"[ORDEN] VENTA {symbol} ESTADO_DESCONOCIDO tras enviar: "
+                  f"{type(e).__name__}: {e}. Requiere reconciliacion por cid={cid}")
+            return estado_desconocido(symbol, lado, f"{type(e).__name__}: {e}",
+                                      base_quantity=base_quantity, client_order_id=cid)
 
         resultado = interpretar_respuesta_binance(respuesta, symbol, lado,
-                                                  base_quantity=base_quantity)
+                                                  base_quantity=base_quantity,
+                                                  client_order_id=cid)
         print(f"[ORDEN] {resultado}")
         return resultado
 
@@ -152,42 +201,24 @@ class RealTradingConnector:
         Ejemplo: de BTC a ETH usando el par BTCETH.
 
         AVISO: no implementa todavia el contrato ResultadoOrden y nadie lo
-        invoca. NO conectarlo hasta migrarlo, o reintroduciria la ambiguedad
-        de unidades y la falta de confirmacion que se corrigieron en P0-1/P0-2.
+        DESACTIVADO A PROPOSITO.
+
+        La implementacion anterior enviaba DOS ordenes de mercado sin
+        client_order_id, sin pasar por el MotorRiesgo y sin contrato de
+        confirmacion. Era la unica ruta viva capaz de:
+          - crear exposicion saltandose el motor de riesgo,
+          - duplicar una orden sin posibilidad de reconciliarla,
+          - vender y volver a comprar el MISMO par, que ademas no es un swap.
+
+        Nadie la invocaba, pero el prompt si ofrece swaps al modelo, asi que era
+        cuestion de tiempo que alguien la conectase. Se neutraliza en lugar de
+        exceptuarla de las guardas.
+
+        La implementacion previa esta en el historial de Git (commit d9c86b6)
+        si algun dia se migra al ciclo Orden -> fills -> reconciliacion.
         """
-        if not self._guard_live(f"SWAP {pair_symbol}"):
-            return None
-        try:
-            # Paso 1: Obtener precio actual del par
-            ticker = self._asegurar_cliente().get_symbol_ticker(symbol=pair_symbol)
-            precio = float(ticker['price'])
-
-            # Paso 2: Determinar step size del par
-            step = self._get_step_size(pair_symbol)
-
-            # Paso 3: Calcular cantidad redondeada a vender
-            cantidad_vender = self._round_to_step(cantidad_from, step)
-
-            # Paso 4: Ejecutar venta del activo origen
-            orden_venta = self._asegurar_cliente().order_market_sell(
-                symbol=pair_symbol,
-                quantity=cantidad_vender
-            )
-            print(f"✅ SWAP VENTA: {cantidad_vender} {from_asset} usando {pair_symbol}")
-
-            # Paso 5: Ejecutar compra del activo destino con el mismo par
-            cantidad_comprar = self._round_to_step(cantidad_vender * precio, step)
-            orden_compra = self._asegurar_cliente().order_market_buy(
-                symbol=pair_symbol,
-                quantity=cantidad_comprar
-            )
-            print(f"✅ SWAP COMPRA: {cantidad_comprar} {to_asset} usando {pair_symbol}")
-
-            return {
-                "venta": orden_venta,
-                "compra": orden_compra
-            }
-
-        except Exception as e:
-            print(f"❌ Error al realizar swap {from_asset} ➝ {to_asset} usando {pair_symbol}: {e}")
-            return None
+        raise NotImplementedError(
+            "swap() esta desactivado: no implementa identidad de orden "
+            "(client_order_id), ni reconciliacion, ni pasa por el MotorRiesgo. "
+            "Migrarlo al ciclo de ordenes antes de habilitarlo."
+        )

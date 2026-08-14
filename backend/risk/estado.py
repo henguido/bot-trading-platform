@@ -50,6 +50,10 @@ class EstadoRiesgo:
     posiciones: Dict[str, Posicion] = field(default_factory=dict)
     pnl_realizado_dia: float = 0.0     # USDT, negativo = perdida
     operaciones_dia: int = 0
+    # Ordenes cuya situacion no conocemos con certeza (P0-14). Mientras haya
+    # alguna, no se puede abrir nueva exposicion: podriamos tener posiciones
+    # reales que el ledger local desconoce.
+    ordenes_pendientes: int = 0
 
     @property
     def exposicion_total(self) -> float:
@@ -140,7 +144,10 @@ def calcular_estado_riesgo(usuario_id, *, dia=None, session_factory=SessionLocal
         return EstadoRiesgo(dia=dia)
 
     operaciones = []
+    pendientes = 0
     with session_factory() as db:
+        from backend.app.services import ordenes_repo
+        pendientes = len(ordenes_repo.ordenes_no_terminales(db, usuario_id))
         simbolos = {a.id: a.simbolo for a in db.query(models.Asset).all()}
         for tx in _transacciones_del_usuario(db, usuario_id):
             symbol = simbolos.get(tx.activo_id)
@@ -153,7 +160,16 @@ def calcular_estado_riesgo(usuario_id, *, dia=None, session_factory=SessionLocal
                 precio=float(tx.precio or 0.0),
                 momento_utc=tx.fecha_operacion,
             ))
-    return reconstruir(operaciones, dia)
+    estado = reconstruir(operaciones, dia)
+    return estado._replace(ordenes_pendientes=pendientes) \
+        if hasattr(estado, "_replace") else _con_pendientes(estado, pendientes)
+
+
+def _con_pendientes(estado, pendientes):
+    return EstadoRiesgo(dia=estado.dia, posiciones=estado.posiciones,
+                        pnl_realizado_dia=estado.pnl_realizado_dia,
+                        operaciones_dia=estado.operaciones_dia,
+                        ordenes_pendientes=pendientes)
 
 
 def calcular_estado_riesgo_paper(simulador, *, dia=None) -> EstadoRiesgo:

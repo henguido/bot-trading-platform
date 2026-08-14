@@ -129,6 +129,18 @@ class MotorRiesgo:
                                   limite_violado="capital_finito",
                                   reglas_aplicadas=tuple(reglas), **base)
 
+        # P0-14: bajo incertidumbre no se abre exposicion nueva. Podriamos tener
+        # una posicion real que el ledger local todavia no conoce.
+        reglas.append("sin_ordenes_pendientes")
+        if estado.ordenes_pendientes > 0:
+            return DecisionRiesgo(
+                aprobado=False,
+                motivo=(f"reconciliacion requerida: {estado.ordenes_pendientes} "
+                        f"orden(es) sin resolver. No se abre nueva exposicion "
+                        f"hasta conocer su estado."),
+                limite_violado="RECONCILIACION_REQUERIDA",
+                reglas_aplicadas=tuple(reglas), **base)
+
         reglas.append("kill_switch_diario")
         if base["kill_switch_activo"]:
             return DecisionRiesgo(

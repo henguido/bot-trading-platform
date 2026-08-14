@@ -4,3 +4,4 @@
 # Las pruebas NO deben tocar Binance, Alpaca, OANDA, OpenAI ni produccion.
 pytest>=8.0
 httpx>=0.27          # requerido por fastapi.testclient.TestClient
+alembic>=1.13

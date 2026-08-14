@@ -178,9 +178,10 @@ def test_cartera_live_persiste_solo_tras_confirmacion(fabrica):
     from backend.app.services.ordenes import EstadoOrden, ResultadoOrden
 
     class TraderQueFalla:
-        def comprar(self, symbol, quote_amount):
+        def comprar(self, symbol, quote_amount, client_order_id=None):
             return ResultadoOrden(symbol=symbol, side=Lado.COMPRA,
-                                  estado=EstadoOrden.ERROR, error="broker caido")
+                                  estado=EstadoOrden.ESTADO_DESCONOCIDO,
+                                  error="broker caido")
 
     with fabrica() as db:
         u = models.User(nombre="T", email="t@e.com", password_hash="x")

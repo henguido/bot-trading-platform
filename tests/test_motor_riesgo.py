@@ -298,11 +298,11 @@ class BrokerEspia:
     def __init__(self):
         self.llamadas = 0
 
-    def comprar(self, symbol, quote_amount):
+    def comprar(self, symbol, quote_amount, client_order_id=None):
         self.llamadas += 1
         raise AssertionError("el broker no deberia recibir nada")
 
-    def vender(self, symbol, base_quantity):
+    def vender(self, symbol, base_quantity, client_order_id=None):
         self.llamadas += 1
         raise AssertionError("el broker no deberia recibir nada")
 

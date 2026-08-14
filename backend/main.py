@@ -32,6 +32,7 @@ from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_petic
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
+from backend.reconciliacion import reconciliar_pendientes
 from contextlib import asynccontextmanager
 import time
 import pytz, traceback
@@ -179,6 +180,13 @@ def trading_loop():
                       "Esperando a que alguien complete /signup...")
                 time.sleep(settings.WAIT_TIME)
                 continue
+
+            # ── RECONCILIACION antes de operar (P0-14) ───────────────────
+            # Solo en LIVE: en PAPER no existen ordenes de broker. Si queda
+            # alguna sin resolver, el MotorRiesgo bloqueara toda compra al ver
+            # estado.ordenes_pendientes > 0.
+            if settings.MODO_REAL:
+                reconciliar_pendientes(real_trader, usuario_id=contexto.usuario_id)
 
             if filters_dict is None:
                 binance.init_client()

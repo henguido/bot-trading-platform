@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Dict, NamedTuple, Optional
 from backend.app import models
 from backend.app.database import SessionLocal
+from backend.app.services import ordenes_repo
+from backend.app.services.ordenes import nuevo_client_order_id
 from sqlalchemy import func
 import json
 
@@ -97,7 +99,8 @@ def guardar_transaccion_real(db: Session, usuario_id: int, symbol: str, action: 
     return transaccion
 
 def ejecutar_y_registrar_compra(*, trader, usuario_id, symbol, quote_amount,
-                                precio_referencia=None, session_factory=SessionLocal):
+                                precio_referencia=None, session_factory=SessionLocal,
+                                decision_audit_id=None):
     """
     COMPRA en LIVE. Persiste UNICAMENTE si el broker confirma la ejecucion.
 
@@ -107,40 +110,76 @@ def ejecutar_y_registrar_compra(*, trader, usuario_id, symbol, quote_amount,
     `quote_amount` es el importe del activo COTIZADO (USDT en BTCUSDT).
     Devuelve el ResultadoOrden del conector, tanto si se persistio como si no.
     """
-    ejecucion = trader.comprar(symbol, quote_amount=quote_amount)
-
-    if not ejecucion.success:
-        # Ni transaccion ni simulacion: la operacion no ocurrio.
-        return ejecucion
-
-    with session_factory() as db:
-        guardar_transaccion_real(
-            db, usuario_id=usuario_id, symbol=symbol, action="COMPRAR",
-            price=ejecucion.average_fill_price or precio_referencia,
-            quantity=ejecucion.executed_base_quantity,
-        )
-    return ejecucion
+    return _ejecutar_con_identidad(
+        trader=trader, usuario_id=usuario_id, symbol=symbol, side="BUY",
+        session_factory=session_factory, quote_amount=quote_amount,
+        decision_audit_id=decision_audit_id,
+        enviar=lambda cid: trader.comprar(symbol, quote_amount=quote_amount,
+                                          client_order_id=cid),
+    )
 
 
 def ejecutar_y_registrar_venta(*, trader, usuario_id, symbol, base_quantity,
-                               precio_referencia=None, session_factory=SessionLocal):
+                               precio_referencia=None, session_factory=SessionLocal,
+                               decision_audit_id=None):
     """
     VENTA en LIVE. Persiste UNICAMENTE si el broker confirma la ejecucion.
 
     `base_quantity` es cantidad del activo BASE (BTC en BTCUSDT). Nunca se le
     pasa precio * cantidad: eso seria un importe en USDT (bug P0-1).
     """
-    ejecucion = trader.vender(symbol, base_quantity=base_quantity)
+    return _ejecutar_con_identidad(
+        trader=trader, usuario_id=usuario_id, symbol=symbol, side="SELL",
+        session_factory=session_factory, base_quantity=base_quantity,
+        decision_audit_id=decision_audit_id,
+        enviar=lambda cid: trader.vender(symbol, base_quantity=base_quantity,
+                                         client_order_id=cid),
+    )
 
-    if not ejecucion.success:
-        return ejecucion
+
+def _ejecutar_con_identidad(*, trader, usuario_id, symbol, side, session_factory,
+                            enviar, base_quantity=None, quote_amount=None,
+                            decision_audit_id=None):
+    """
+    Ciclo de vida completo de una orden con identidad (P0-10 / P0-11).
+
+        client_order_id -> intencion persistida -> ENVIANDO -> POST
+        -> resultado -> fills idempotentes -> transaccion
+
+    La intencion se guarda ANTES del envio: si perdemos la respuesta, la orden
+    queda registrada como ESTADO_DESCONOCIDO y el reconciliador puede
+    preguntarle al broker por ese client_order_id. Sin ese registro previo, una
+    orden ejecutada cuya respuesta se pierde seria invisible para siempre.
+    """
+    cid = nuevo_client_order_id()
 
     with session_factory() as db:
-        guardar_transaccion_real(
-            db, usuario_id=usuario_id, symbol=symbol, action="VENDER",
-            price=ejecucion.average_fill_price or precio_referencia,
-            quantity=ejecucion.executed_base_quantity,
-        )
+        orden = ordenes_repo.crear_intencion(
+            db, client_order_id=cid, usuario_id=usuario_id, symbol=symbol, side=side,
+            requested_base_quantity=base_quantity, requested_quote_amount=quote_amount,
+            decision_audit_id=decision_audit_id)
+        ordenes_repo.marcar_enviando(db, orden)
+
+    ejecucion = enviar(cid)
+
+    with session_factory() as db:
+        orden = db.query(models.Orden).filter_by(client_order_id=cid).first()
+        if orden is not None:
+            ordenes_repo.aplicar_resultado(db, orden, ejecucion)
+            # Los fills se procesan siempre que existan, incluso en ejecuciones
+            # parciales. Son idempotentes por restriccion de BD.
+            if ejecucion.fills:
+                ordenes_repo.procesar_fills(db, orden, ejecucion.fills)
+            elif ejecucion.success:
+                # El broker confirmo cantidad pero no detallo fills: se registra
+                # un fill sintetico identificado por el propio order_id, para no
+                # perder el apunte contable ni romper la idempotencia.
+                ordenes_repo.procesar_fills(db, orden, [{
+                    "trade_id": f"orden:{ejecucion.order_id or cid}",
+                    "price": ejecucion.average_fill_price or 0.0,
+                    "qty": ejecucion.executed_base_quantity,
+                    "commission": None, "commission_asset": None,
+                }])
     return ejecucion
 
 
