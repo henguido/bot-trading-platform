@@ -82,12 +82,27 @@ SECURE_DASHBOARD = False
 # app/auth.py con 24 h. El valor efectivo era el de auth.py, así que el
 # declarado aquí (60 min) nunca se aplicaba. Ahora auth.py importa de aquí.
 # ─────────────────────────────────────────────────────────────────────────────
-SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
+# SIN valor por defecto, a proposito. Una clave de firma conocida permitiria a
+# cualquiera emitir tokens validos y anularia por completo la autenticacion.
+# Si falta, la aplicacion NO debe arrancar (fallo seguro, no degradado).
+SECRET_KEY = os.getenv('SECRET_KEY')
+
+_CLAVES_PROHIBIDAS = {'dev-secret-key', 'supersecret', 'changeme', 'secret'}
+
+if SECRET_KEY is None or not SECRET_KEY.strip():
+    raise RuntimeError(
+        "SECRET_KEY no esta definida. Define la variable de entorno SECRET_KEY "
+        "antes de arrancar (ver .env.example). No existe valor por defecto: "
+        "una clave conocida permitiria a cualquiera firmar tokens validos."
+    )
+if SECRET_KEY.strip().lower() in _CLAVES_PROHIBIDAS:
+    raise RuntimeError(
+        "SECRET_KEY tiene un valor de ejemplo conocido publicamente. "
+        "Genera una clave aleatoria, por ejemplo con: "
+        "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    )
+
 ALGORITHM = 'HS256'
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
-
-if SECRET_KEY == 'dev-secret-key':
-    print("[AVISO] SECRET_KEY usa el valor por defecto de desarrollo. "
-          "Definela en el entorno antes de exponer la API.")
 
 RISK_PER_TRADE = 0.1  # 10% por operación
