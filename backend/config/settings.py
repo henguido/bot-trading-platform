@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+import math
 import os
 
 load_dotenv()
@@ -105,4 +106,69 @@ if SECRET_KEY.strip().lower() in _CLAVES_PROHIBIDAS:
 ALGORITHM = 'HS256'
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
 
-RISK_PER_TRADE = 0.1  # 10% por operación
+# ─────────────────────────────────────────────────────────────────────────────
+# GESTION DE RIESGO (P0-6 / P0-8)
+#
+# Todas estas variables SI se leen del entorno. Antes eran literales fijos en
+# este archivo, de modo que los valores del .env se ignoraban en silencio.
+#
+# IMPORTANTE sobre la nomenclatura: LIMITE_ASIGNACION_POR_OPERACION NO es
+# "riesgo por operacion". Sin stop loss no existe el calculo clasico
+# (riesgo monetario / distancia al stop = tamano). Es simplemente la fraccion
+# del capital disponible que puede asignarse a una sola operacion. El position
+# sizing basado en stop corresponde a una fase posterior.
+# ─────────────────────────────────────────────────────────────────────────────
+def _leer_float(nombre, defecto, *, minimo=None, maximo=None, alias=None):
+    bruto = os.getenv(nombre)
+    if bruto is None and alias:
+        bruto = os.getenv(alias)          # compatibilidad con el nombre antiguo
+    if bruto is None or not str(bruto).strip():
+        return defecto
+    try:
+        valor = float(bruto)
+    except (TypeError, ValueError):
+        raise RuntimeError(f"{nombre} debe ser numerico, se recibio {bruto!r}")
+    if not math.isfinite(valor):
+        raise RuntimeError(f"{nombre} debe ser finito, se recibio {bruto!r}")
+    if minimo is not None and valor < minimo:
+        raise RuntimeError(f"{nombre}={valor} es menor que el minimo permitido {minimo}")
+    if maximo is not None and valor > maximo:
+        raise RuntimeError(f"{nombre}={valor} supera el maximo permitido {maximo}")
+    return valor
+
+
+# Tope duro por operacion individual. Unidad: USDT (activo cotizado).
+MONTO_MAXIMO_USDT = _leer_float('MONTO_MAXIMO_USDT', 20.0, minimo=0.0)
+
+# Fraccion del capital disponible asignable a UNA operacion. Unidad: fraccion 0..1.
+# Sustituye conceptualmente a RISK_PER_TRADE, que se acepta como alias.
+LIMITE_ASIGNACION_POR_OPERACION = _leer_float(
+    'LIMITE_ASIGNACION_POR_OPERACION', 0.1, minimo=0.0, maximo=1.0, alias='RISK_PER_TRADE')
+
+# Alias historico. Mismo valor; conservado solo para no romper referencias.
+RISK_PER_TRADE = LIMITE_ASIGNACION_POR_OPERACION
+
+# Perdida REALIZADA maxima tolerada por dia de riesgo. Unidad: USDT ABSOLUTOS,
+# valor positivo. Al alcanzarla se activa el kill switch diario.
+#
+# NO se aliasa el antiguo MAX_DAILY_LOSS a proposito. Su unidad nunca estuvo
+# definida y el valor presente en los .env existentes (0.05, junto a un
+# RISK_PER_TRADE de 0.02) parece una FRACCION, no USDT. Interpretarlo como
+# importe absoluto dispararia el kill switch al perder cinco centimos.
+# La migracion debe ser explicita.
+MAX_DAILY_LOSS_USDT = _leer_float('MAX_DAILY_LOSS_USDT', 20.0, minimo=0.0)
+
+if os.getenv('MAX_DAILY_LOSS') is not None and os.getenv('MAX_DAILY_LOSS_USDT') is None:
+    print("[AVISO] MAX_DAILY_LOSS existe en el entorno pero se IGNORA: su unidad "
+          "nunca estuvo definida. Define MAX_DAILY_LOSS_USDT en USDT absolutos. "
+          f"Usando el valor por defecto {MAX_DAILY_LOSS_USDT} USDT.")
+
+# Exposicion maxima acumulada, valorada A COSTE (suma de cantidad x precio
+# medio de cada posicion). Unidad: USDT. Impide la acumulacion ilimitada que el
+# tope por operacion no evita.
+MAX_EXPOSICION_TOTAL_USDT = _leer_float('MAX_EXPOSICION_TOTAL_USDT', 100.0, minimo=0.0)
+MAX_EXPOSICION_POR_ACTIVO_USDT = _leer_float('MAX_EXPOSICION_POR_ACTIVO_USDT', 50.0, minimo=0.0)
+
+# Zona horaria que define el limite del dia de riesgo. Cripto opera 24/7, asi
+# que el corte es convencional: medianoche en esta zona.
+RISK_TIMEZONE = os.getenv('RISK_TIMEZONE', 'America/Costa_Rica').strip() or 'America/Costa_Rica'

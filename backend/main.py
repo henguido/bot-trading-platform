@@ -28,7 +28,9 @@ from backend.app.services.real_trading import (
 from backend.routes import transacciones_routes, binance_routes
 from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
-from backend.app.services.ordenes import es_cantidad_valida, validar_peticion_venta
+from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
+from backend.risk.estado import calcular_estado_riesgo, calcular_estado_riesgo_paper
+from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 import time
 import threading, pytz, traceback
 
@@ -85,6 +87,56 @@ real_trader = RealTradingConnector()
 
 def priorizar_activos_por_importancia(activos):
     return [a for a in activos if a["position_quantity"] > 0]
+
+motor_riesgo = MotorRiesgo()
+
+
+def capital_disponible_actual(usdt_disponible):
+    """
+    Capital operable, en USDT. En LIVE manda el saldo real del exchange; en
+    PAPER, el capital del libro en memoria. Nunca se mezclan.
+    """
+    if settings.MODO_REAL:
+        return float(usdt_disponible or 0.0)
+    return float(simulator.capital_usd)
+
+
+def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
+    """
+    Deja constancia de una operacion vetada por el motor.
+
+    Se reutiliza DecisionAudit, que ya existe: no hace falta migracion. Se
+    guarda con quantity=0 y action='RECHAZADA_RIESGO' para que jamas pueda
+    confundirse con una transaccion ejecutada.
+    """
+    try:
+        with SessionLocal() as db:
+            guardar_auditoria_decision(
+                db,
+                symbol=veredicto.symbol,
+                action="RECHAZADA_RIESGO",
+                quantity=0.0,
+                price=0.0,
+                sentimiento=sentimiento,
+                noticias=noticias,
+                risk_score=0.0,
+                decision_gpt={
+                    "resultado": "RECHAZADA_POR_RIESGO",
+                    "side": veredicto.side.value,
+                    "motivo": veredicto.motivo,
+                    "limite_violado": veredicto.limite_violado,
+                    "requested_by_model": veredicto.requested_by_model,
+                    "capital_available": veredicto.capital_available,
+                    "current_exposure": veredicto.current_exposure,
+                    "exposure_symbol": veredicto.exposure_symbol,
+                    "daily_realized_pnl": veredicto.daily_realized_pnl,
+                    "kill_switch_activo": veredicto.kill_switch_activo,
+                    "reglas_aplicadas": list(veredicto.reglas_aplicadas),
+                },
+            )
+    except Exception as e:
+        print(f"⚠️ No se pudo auditar el rechazo de riesgo: {type(e).__name__}: {e}")
+
 
 def posicion_disponible(symbol, saldo_real_dict):
     """
@@ -355,59 +407,65 @@ def trading_loop():
                     print(f"⚠️ Precio no disponible para {symbol}. Se omite.")
                     continue
 
-                if decision == "COMPRAR":
-                    if not es_cantidad_valida(base_quantity):
-                        print(f"⛔ COMPRA {symbol} descartada: base_quantity invalida "
-                              f"({base_quantity!r})")
+                if decision in ("COMPRAR", "VENDER"):
+                    lado = Lado.COMPRA if decision == "COMPRAR" else Lado.VENTA
+
+                    # Estado de riesgo FRESCO por decision: la exposicion puede
+                    # cambiar dentro del propio ciclo si se ejecutan varias
+                    # ordenes. Se reconstruye desde operaciones confirmadas.
+                    estado_riesgo = (
+                        calcular_estado_riesgo(contexto.usuario_id)
+                        if settings.MODO_REAL
+                        else calcular_estado_riesgo_paper(simulator)
+                    )
+
+                    # base_quantity viene del modelo y NO ES AUTORITATIVA para
+                    # el tamano: el motor lo recalcula desde cero.
+                    propuesta = PropuestaOperacion(
+                        symbol=symbol, side=lado, precio=precio_actual,
+                        base_quantity_modelo=base_quantity,
+                        min_notional=get_min_notional(symbol, filters_dict),
+                    )
+                    veredicto = motor_riesgo.evaluar(
+                        propuesta,
+                        capital_disponible=capital_disponible_actual(usdt_disponible),
+                        estado=estado_riesgo,
+                    )
+
+                    if not veredicto.aprobado:
+                        print(f"⛔ {veredicto}")
+                        registrar_rechazo_riesgo(veredicto, sentimiento=sentimiento,
+                                                 noticias=noticias_str)
                         continue
 
-                    quote_amount = precio_actual * base_quantity  # USDT a invertir
-                    min_notional = get_min_notional(symbol, filters_dict)
-                    if quote_amount < min_notional:
-                        print(f"⚠️ Orden ignorada: notional ${quote_amount:.6f} menor al "
-                              f"minimo ${min_notional:.2f} para {symbol}")
-                        continue
-
-                    if settings.MODO_REAL:
-                        # LIVE: persiste solo tras confirmacion del broker. Si
-                        # falla, NO se persiste y NO se simula: una orden real
-                        # fallida no puede convertirse en operacion registrada.
-                        ejecucion = ejecutar_y_registrar_compra(
-                            trader=real_trader, usuario_id=contexto.usuario_id,
-                            symbol=symbol, quote_amount=quote_amount,
-                            precio_referencia=precio_actual,
-                        )
-                        if not ejecucion.success:
-                            print(f"⛔ COMPRA {symbol} NO registrada: {ejecucion}")
+                    if lado is Lado.COMPRA:
+                        if settings.MODO_REAL:
+                            # LIVE: persiste solo tras confirmacion del broker.
+                            ejecucion = ejecutar_y_registrar_compra(
+                                trader=real_trader, usuario_id=contexto.usuario_id,
+                                symbol=symbol,
+                                quote_amount=veredicto.approved_quote_amount,
+                                precio_referencia=precio_actual,
+                            )
+                            if not ejecucion.success:
+                                print(f"⛔ COMPRA {symbol} NO registrada: {ejecucion}")
+                        else:
+                            # PAPER: solo el libro en memoria. Nunca toca la BD.
+                            simulator.simulate_trade(symbol, "COMPRAR", precio_actual,
+                                                     veredicto.approved_base_quantity)
                     else:
-                        # PAPER: solo el libro en memoria. Nunca toca la BD.
-                        simulator.simulate_trade(symbol, "COMPRAR", precio_actual, base_quantity)
-
-                elif decision == "VENDER":
-                    if not es_cantidad_valida(base_quantity):
-                        print(f"⛔ VENTA {symbol} descartada: base_quantity invalida "
-                              f"({base_quantity!r})")
-                        continue
-
-                    disponible = posicion_disponible(symbol, saldo_real_dict)
-                    motivo = validar_peticion_venta(symbol, base_quantity, disponible=disponible)
-                    if motivo:
-                        print(f"⛔ VENTA {symbol} descartada: {motivo}")
-                        continue
-
-                    if settings.MODO_REAL:
-                        # base_quantity va tal cual: es cantidad de activo base.
-                        # Pasar precio_actual * base_quantity venderia el importe
-                        # en USDT interpretado como BTC (bug P0-1).
-                        ejecucion = ejecutar_y_registrar_venta(
-                            trader=real_trader, usuario_id=contexto.usuario_id,
-                            symbol=symbol, base_quantity=base_quantity,
-                            precio_referencia=precio_actual,
-                        )
-                        if not ejecucion.success:
-                            print(f"⛔ VENTA {symbol} NO registrada: {ejecucion}")
-                    else:
-                        simulator.simulate_trade(symbol, "VENDER", precio_actual, base_quantity)
+                        if settings.MODO_REAL:
+                            ejecucion = ejecutar_y_registrar_venta(
+                                trader=real_trader, usuario_id=contexto.usuario_id,
+                                symbol=symbol,
+                                base_quantity=veredicto.approved_base_quantity,
+                                precio_referencia=precio_actual,
+                            )
+                            if not ejecucion.success:
+                                print(f"⛔ VENTA {symbol} NO registrada: {ejecucion}")
+                        else:
+                            simulator.simulate_trade(symbol, "VENDER", precio_actual,
+                                                     veredicto.approved_base_quantity)
 
                 elif decision == "ESPERAR":
                     # En modo real, también considerar si hay saldo real
