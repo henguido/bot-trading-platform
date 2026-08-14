@@ -23,6 +23,10 @@ ENDPOINTS = [
     ("backend/main.py",                        "/api/resumen",             True),
     ("backend/main.py",                        "/login",                   False),
     ("backend/main.py",                        "/signup",                  False),
+    # Sonda de vida y liderazgo (P0-13). Publica a proposito: las sondas de
+    # infraestructura no llevan token. No expone saldos, posiciones ni
+    # transacciones; solo modo de ejecucion y quien lidera el bucle.
+    ("backend/main.py",                        "/health",                  False),
     ("backend/routes/binance_routes.py",       "/balance",                 True),
     ("backend/routes/transacciones_routes.py", "/api/transacciones-reales", True),
     ("backend/routes/historial_routes.py",     "/api/historial",           True),
@@ -81,9 +85,17 @@ def test_ningun_endpoint_financiero_quedo_sin_revisar():
             )
 
 
-def test_las_pruebas_no_importan_main_ni_conectores_reales():
-    """Salvaguarda: ningun modulo de test debe importar main ni los conectores."""
-    prohibidos = ("backend.main", "real_trading_connector", "alpaca_connector",
+def test_las_pruebas_no_importan_conectores_reales():
+    """
+    Salvaguarda: ningun modulo de test debe importar los conectores, cuyos
+    constructores pueden abrir conexiones.
+
+    `backend.main` SI puede importarse desde P0-13/P1-7: ya no arranca el bucle
+    al importarse y el cliente de Binance es perezoso. Lo demuestran
+    test_coordinador.test_importar_main_no_arranca_ningun_bucle y
+    test_main_no_arranca_hilos_a_nivel_de_modulo.
+    """
+    prohibidos = ("real_trading_connector", "alpaca_connector",
                   "oanda_connector", "openai_connector")
     for archivo in Path(RAIZ, "tests").glob("*.py"):
         texto = archivo.read_text(encoding="utf-8")

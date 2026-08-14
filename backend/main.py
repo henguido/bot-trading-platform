@@ -31,10 +31,28 @@ from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
+from backend.coordinador import CoordinadorTrading, candado_por_defecto
+from contextlib import asynccontextmanager
 import time
-import threading, pytz, traceback
+import pytz, traceback
 
 models.Base.metadata.create_all(bind=engine)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    """
+    Unico punto de arranque y parada del bucle de trading (P0-13).
+
+    `coordinador` se resuelve como global EN TIEMPO DE EJECUCION, no al definir
+    esta funcion: se instancia mas abajo, cuando trading_loop ya existe.
+    """
+    coordinador.iniciar()          # no arranca si otro proceso es lider
+    try:
+        yield
+    finally:
+        coordinador.detener()
+
 
 app = FastAPI(
     title="BOT Trading Platform",
@@ -42,7 +60,8 @@ app = FastAPI(
     version="1.0.0",
     openapi_url="/openapi.json",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 app.include_router(transacciones_routes.router)
@@ -456,9 +475,30 @@ def trading_loop():
             ciclo += 1
 
 
-# El hilo arranca SIEMPRE. Si aun no hay usuarios, el propio bucle lo trata
-# como estado normal y espera; ya no hace falta relanzarlo desde /signup.
-threading.Thread(target=trading_loop, daemon=True).start()
+# ─────────────────────────────────────────────────────────────────────────────
+# CICLO DE VIDA (P0-13)
+#
+# Importar este modulo NO arranca a operar. El bucle solo se pone en marcha
+# desde el lifespan de FastAPI y unicamente si este proceso gana el candado de
+# liderazgo. Con --reload o --workers N, solo uno opera; los demas lo registran
+# y se quedan sirviendo la API.
+# ─────────────────────────────────────────────────────────────────────────────
+coordinador = CoordinadorTrading(
+    objetivo=trading_loop,
+    candado=candado_por_defecto(settings.DATABASE_URL),
+)
+
+
+@app.get("/health")
+def health():
+    """Permite ver desde fuera quien es el lider y por que no opera un proceso."""
+    return {
+        "trading_mode": settings.TRADING_MODE,
+        "modo_real": settings.MODO_REAL,
+        "bucle_activo": coordinador.activo,
+        "es_lider": coordinador.es_lider,
+        "motivo_inactivo": coordinador.motivo_inactivo or None,
+    }
 
 # Rutas
 @app.get("/api/historial")

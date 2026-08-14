@@ -5,7 +5,11 @@ BACKEND_DIR="./bot"
 FRONTEND_DIR="./frontend"
 
 # Comando para backend
-BACKEND_CMD="uvicorn backend.main:app --reload"
+# Sin recarga automatica y con un unico worker, a proposito (P0-13): la recarga
+# respawnea el proceso y varios workers crean varios procesos, cada uno
+# intentando operar. El candado de liderazgo lo impediria, pero no conviene
+# provocarlo en un script que pretende parecerse a produccion.
+BACKEND_CMD="uvicorn backend.main:app --workers 1"
 
 # Comando para frontend
 FRONTEND_CMD="npm run dev"

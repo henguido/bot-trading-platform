@@ -14,10 +14,26 @@ from backend.app.services.ordenes import (
 )
 
 class RealTradingConnector:
+    # Timeout explicito para TODA comunicacion con el broker. Sin esto un
+    # POST /order puede colgarse indefinidamente y bloquear el bucle (P0-12).
+    TIMEOUT_SEGUNDOS = 20
+
     def __init__(self):
         self.api_key = settings.BINANCE_API_KEY
         self.api_secret = settings.BINANCE_API_SECRET
-        self.client = Client(self.api_key, self.api_secret)
+        # Conexion PEREZOSA: construir el Client hace red, y hacerlo al
+        # importar el modulo reintroduce el bloqueo geografico que el commit
+        # 6efdd51 corrigio para BinanceConnector. Ademas impide que importar
+        # backend.main sea una operacion inocua.
+        self.client = None
+
+    def _asegurar_cliente(self):
+        if self.client is None:
+            self.client = Client(
+                self.api_key, self.api_secret,
+                requests_params={"timeout": self.TIMEOUT_SEGUNDOS},
+            )
+        return self.client
 
     def _guard_live(self, operacion):
         """
@@ -32,7 +48,7 @@ class RealTradingConnector:
 
     def _get_step_size(self, symbol):
         try:
-            info = self.client.get_symbol_info(symbol)
+            info = self._asegurar_cliente().get_symbol_info(symbol)
             for f in info['filters']:
                 if f['filterType'] == 'LOT_SIZE':
                     return float(f['stepSize'])
@@ -64,7 +80,7 @@ class RealTradingConnector:
             return bloqueada_paper(symbol, lado, quote_amount=quote_amount)
 
         try:
-            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            ticker = self._asegurar_cliente().get_symbol_ticker(symbol=symbol)
             precio_actual = float(ticker["price"])
             if not es_cantidad_valida(precio_actual):
                 return rechazada(symbol, lado, f"precio invalido del broker: {precio_actual!r}",
@@ -79,7 +95,7 @@ class RealTradingConnector:
                                  f"{base_quantity!r}; el importe es demasiado pequeno",
                                  quote_amount=quote_amount)
 
-            respuesta = self.client.order_market_buy(symbol=symbol, quantity=base_quantity)
+            respuesta = self._asegurar_cliente().order_market_buy(symbol=symbol, quantity=base_quantity)
 
         except Exception as e:
             print(f"[ORDEN] COMPRA {symbol} ERROR: {type(e).__name__}: {e}")
@@ -118,7 +134,7 @@ class RealTradingConnector:
                                  f"tras redondear al step size la cantidad base quedo en "
                                  f"{cantidad!r}", base_quantity=base_quantity)
 
-            respuesta = self.client.order_market_sell(symbol=symbol, quantity=cantidad)
+            respuesta = self._asegurar_cliente().order_market_sell(symbol=symbol, quantity=cantidad)
 
         except Exception as e:
             print(f"[ORDEN] VENTA {symbol} ERROR: {type(e).__name__}: {e}")
@@ -143,7 +159,7 @@ class RealTradingConnector:
             return None
         try:
             # Paso 1: Obtener precio actual del par
-            ticker = self.client.get_symbol_ticker(symbol=pair_symbol)
+            ticker = self._asegurar_cliente().get_symbol_ticker(symbol=pair_symbol)
             precio = float(ticker['price'])
 
             # Paso 2: Determinar step size del par
@@ -153,7 +169,7 @@ class RealTradingConnector:
             cantidad_vender = self._round_to_step(cantidad_from, step)
 
             # Paso 4: Ejecutar venta del activo origen
-            orden_venta = self.client.order_market_sell(
+            orden_venta = self._asegurar_cliente().order_market_sell(
                 symbol=pair_symbol,
                 quantity=cantidad_vender
             )
@@ -161,7 +177,7 @@ class RealTradingConnector:
 
             # Paso 5: Ejecutar compra del activo destino con el mismo par
             cantidad_comprar = self._round_to_step(cantidad_vender * precio, step)
-            orden_compra = self.client.order_market_buy(
+            orden_compra = self._asegurar_cliente().order_market_buy(
                 symbol=pair_symbol,
                 quantity=cantidad_comprar
             )
