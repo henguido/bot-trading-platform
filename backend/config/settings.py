@@ -74,11 +74,20 @@ API_PORT = 8000
 
 # 🛡️ Seguridad (para frontend privado en el futuro)
 SECURE_DASHBOARD = False
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# 🔐 JWT Configuración para autenticación
+# ─────────────────────────────────────────────────────────────────────────────
+# JWT — CONFIGURACIÓN CANÓNICA (única fuente de verdad)
+#
+# Antes estaba duplicada en este mismo archivo y, además, redefinida en
+# app/auth.py con 24 h. El valor efectivo era el de auth.py, así que el
+# declarado aquí (60 min) nunca se aplicaba. Ahora auth.py importa de aquí.
+# ─────────────────────────────────────────────────────────────────────────────
 SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ALGORITHM = 'HS256'
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+
+if SECRET_KEY == 'dev-secret-key':
+    print("[AVISO] SECRET_KEY usa el valor por defecto de desarrollo. "
+          "Definela en el entorno antes de exponer la API.")
+
 RISK_PER_TRADE = 0.1  # 10% por operación

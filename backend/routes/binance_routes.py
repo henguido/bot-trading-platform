@@ -1,13 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.config import settings
 from backend.state import simulator  # ✅ Usamos el nuevo archivo state.py
+from backend.app.auth import get_current_user
+from backend.app import models
 
 router = APIRouter()
 binance = BinanceConnector()
 
 @router.get("/balance", tags=["Binance"])
-def get_binance_balance():
+def get_binance_balance(current_user: models.User = Depends(get_current_user)):
     """
     Retorna balances con datos ampliados: precio actual, valor USD, precio promedio y ganancia/pérdida.
     """

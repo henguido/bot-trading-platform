@@ -1,0 +1,6 @@
+# Dependencias solo para desarrollo y pruebas.
+# Instalar con:  pip install -r requirements-dev.txt
+#
+# Las pruebas NO deben tocar Binance, Alpaca, OANDA, OpenAI ni produccion.
+pytest>=8.0
+httpx>=0.27          # requerido por fastapi.testclient.TestClient

@@ -2,9 +2,17 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app import models, schemas, database
 from backend.app.database import SessionLocal
-from backend.config.settings import DATABASE_URL, SECRET_KEY
+from backend.config.settings import (
+    DATABASE_URL,
+    SECRET_KEY,
+    ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 from passlib.context import CryptContext
-from jose import jwt
+# JWTError es la clase base de todos los errores de python-jose (firma invalida,
+# token malformado, ExpiredSignatureError...). Antes se usaba en el 'except' sin
+# importarla, lo que convertia cualquier token invalido en un 500 por NameError.
+from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer
 
@@ -13,9 +21,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# Algoritmo JWT y tiempo de expiración del token
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 horas
+# ALGORITHM y ACCESS_TOKEN_EXPIRE_MINUTES se importan de config.settings, que es
+# la unica fuente de verdad. Antes se redefinian aqui (24 h) contradiciendo el
+# valor declarado en settings (60 min).
 
 # Obtener instancia de base de datos (para usar con Depends)
 def get_db():

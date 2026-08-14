@@ -2,11 +2,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from backend.app import models
 from backend.app.database import get_db
+from backend.app.auth import get_current_user
 
 router = APIRouter()
 
 @router.get("/api/transacciones-reales", tags=["Transacciones"])
-def obtener_transacciones_reales(db: Session = Depends(get_db)):
+def obtener_transacciones_reales(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     transacciones = (
         db.query(models.Transaction)
         .join(models.Asset, models.Transaction.activo_id == models.Asset.id)

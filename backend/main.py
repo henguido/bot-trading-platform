@@ -407,7 +407,10 @@ else:
 
 # Rutas
 @app.get("/api/historial")
-def get_historial(db: Session = Depends(get_db)):
+def get_historial(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     auditorias = db.query(models.DecisionAudit).order_by(models.DecisionAudit.timestamp.desc()).all()
     historial = []
 
@@ -436,7 +439,7 @@ def get_historial(db: Session = Depends(get_db)):
     return historial
 
 @app.get("/api/resumen")
-def resumen_portafolio():
+def resumen_portafolio(current_user: models.User = Depends(get_current_user)):
     balances = binance.get_account_balance()
     resumen = []
     ganancia_total = 0.0
