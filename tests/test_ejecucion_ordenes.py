@@ -371,13 +371,29 @@ def test_regresion_p0_1_pasar_el_importe_como_base_seria_catastrofico(monkeypatc
         "seria 100.000 veces la posicion real"
 
 
-def test_regresion_p0_1_main_no_multiplica_precio_por_cantidad_al_vender():
-    """Guarda estructural: la venta en main.py no puede pasar un importe."""
+RUTA_EJECUCION = Path("backend", "portafolio", "carteras.py")
+
+
+def test_la_ejecucion_vive_en_un_unico_modulo():
+    """
+    main.py no debe llamar directamente a la ejecucion: pasa por la cartera.
+    Asi la separacion PAPER/LIVE no depende de ifs dispersos (P0-15).
+    """
     arbol = ast.parse(Path(RAIZ, "backend", "main.py").read_text(encoding="utf-8"))
+    directas = [n for n in ast.walk(arbol)
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "id", None) in ("ejecutar_y_registrar_compra",
+                                                    "ejecutar_y_registrar_venta")]
+    assert not directas, "main.py debe ejecutar a traves de la cartera, no directamente"
+
+
+def test_regresion_p0_1_la_venta_no_multiplica_precio_por_cantidad():
+    """Guarda estructural: la venta nunca puede pasar un importe como cantidad."""
+    arbol = ast.parse(Path(RAIZ, RUTA_EJECUCION).read_text(encoding="utf-8"))
     llamadas = [n for n in ast.walk(arbol)
                 if isinstance(n, ast.Call)
                 and getattr(n.func, "id", None) == "ejecutar_y_registrar_venta"]
-    assert llamadas, "no se encontro la ejecucion de venta en main.py"
+    assert llamadas, f"no se encontro la ejecucion de venta en {RUTA_EJECUCION}"
     for llamada in llamadas:
         claves = {k.arg for k in llamada.keywords}
         assert "base_quantity" in claves, "la venta debe recibir base_quantity"

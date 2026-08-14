@@ -341,9 +341,11 @@ def test_13_regresion_p0_8_el_modelo_ya_no_fija_el_importe():
     assert d.approved_quote_amount < importe_antiguo / 1000
 
 
-def test_13b_main_no_deriva_el_importe_de_la_cantidad_del_modelo():
+def test_13b_la_ejecucion_no_deriva_el_importe_de_la_cantidad_del_modelo():
     """AST: la ejecucion usa el veredicto del motor, no precio * base_quantity."""
-    arbol = ast.parse(Path(RAIZ, "backend", "main.py").read_text(encoding="utf-8"))
+    ruta = Path(RAIZ, "backend", "portafolio", "carteras.py")
+    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
+    encontradas = 0
     for nodo in ast.walk(arbol):
         if not (isinstance(nodo, ast.Call)
                 and getattr(nodo.func, "id", None) in ("ejecutar_y_registrar_compra",
@@ -351,12 +353,18 @@ def test_13b_main_no_deriva_el_importe_de_la_cantidad_del_modelo():
             continue
         for kw in nodo.keywords:
             if kw.arg in ("quote_amount", "base_quantity"):
+                encontradas += 1
                 assert isinstance(kw.value, ast.Attribute), (
                     f"{kw.arg} debe venir del veredicto del motor, no de una expresion"
                 )
                 assert kw.value.attr.startswith("approved_"), (
                     f"{kw.arg}={kw.value.attr}: debe ser un campo approved_* del motor"
                 )
+    # Sin esto la prueba pasaria vacuamente si la ejecucion se moviera de sitio.
+    assert encontradas == 2, (
+        f"se esperaban 2 importes (compra y venta) tomados del veredicto, "
+        f"se encontraron {encontradas} en {ruta.name}"
+    )
 
 
 # ═══ 14 · REGRESION P0-6 ═════════════════════════════════════════════════════
@@ -392,27 +400,28 @@ def test_15_ninguna_ejecucion_sin_veredicto_aprobado():
                     and isinstance(n.func, ast.Attribute) and n.func.attr == "evaluar"]
     assert evaluaciones, "trading_loop debe invocar al motor de riesgo"
 
+    # Tras P0-15 la ejecucion pasa por la cartera del modo activo.
     ejecuciones = [n for n in ast.walk(bucle)
                    if isinstance(n, ast.Call)
-                   and getattr(n.func, "id", None) in ("ejecutar_y_registrar_compra",
-                                                       "ejecutar_y_registrar_venta")]
-    assert ejecuciones, "no se encontraron ejecuciones en trading_loop"
+                   and isinstance(n.func, ast.Attribute)
+                   and n.func.attr == "ejecutar"]
+    assert ejecuciones, "no se encontro ninguna ejecucion en trading_loop"
 
-    # Toda ejecucion debe vivir bajo un guard que verifique el veredicto.
+    # Ninguna ejecucion puede alcanzarse sin veredicto: el patron es
+    # `if not veredicto.aprobado: ... continue` antes de ejecutar.
     guardas = [n for n in ast.walk(bucle)
                if isinstance(n, ast.If) and "aprobado" in ast.dump(n.test)]
     assert guardas, "debe existir un guard sobre veredicto.aprobado"
+    assert any(isinstance(s, ast.Continue) for g in guardas for s in ast.walk(g)), (
+        "el guard del veredicto debe cortar el flujo con continue antes de ejecutar"
+    )
 
-    protegidas = set()
-    for guarda in guardas:
-        for sub in ast.walk(guarda):
-            if sub in ejecuciones:
-                protegidas.add(id(sub))
-        # el patron real es `if not veredicto.aprobado: ... continue`
-    cubiertas_por_continue = any(
-        isinstance(s, ast.Continue) for g in guardas for s in ast.walk(g))
-    assert cubiertas_por_continue or len(protegidas) == len(ejecuciones), (
-        "las ejecuciones deben estar protegidas por el veredicto del motor"
+    # Y el guard debe aparecer ANTES que la ejecucion en el cuerpo del bucle.
+    linea_guard = min(g.lineno for g in guardas)
+    linea_exec = min(e.lineno for e in ejecuciones)
+    assert linea_guard < linea_exec, (
+        f"el guard del veredicto (linea {linea_guard}) debe preceder a la "
+        f"ejecucion (linea {linea_exec})"
     )
 
 

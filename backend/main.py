@@ -29,8 +29,8 @@ from backend.routes import transacciones_routes, binance_routes
 from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
-from backend.risk.estado import calcular_estado_riesgo, calcular_estado_riesgo_paper
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
+from backend.portafolio.carteras import construir_cartera
 import time
 import threading, pytz, traceback
 
@@ -91,16 +91,6 @@ def priorizar_activos_por_importancia(activos):
 motor_riesgo = MotorRiesgo()
 
 
-def capital_disponible_actual(usdt_disponible):
-    """
-    Capital operable, en USDT. En LIVE manda el saldo real del exchange; en
-    PAPER, el capital del libro en memoria. Nunca se mezclan.
-    """
-    if settings.MODO_REAL:
-        return float(usdt_disponible or 0.0)
-    return float(simulator.capital_usd)
-
-
 def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
     """
     Deja constancia de una operacion vetada por el motor.
@@ -136,20 +126,6 @@ def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
             )
     except Exception as e:
         print(f"⚠️ No se pudo auditar el rechazo de riesgo: {type(e).__name__}: {e}")
-
-
-def posicion_disponible(symbol, saldo_real_dict):
-    """
-    Cantidad de ACTIVO BASE disponible para vender, en las unidades correctas.
-
-    En LIVE manda el saldo real del exchange; en PAPER, el libro en memoria del
-    simulador. Nunca se mezclan: una posicion simulada no autoriza una venta
-    real, ni al reves.
-    """
-    if settings.MODO_REAL:
-        return float(saldo_real_dict.get(symbol.replace("USDT", ""), 0.0))
-    posicion = simulator.positions.get(symbol)
-    return float(posicion.quantity) if posicion else 0.0
 
 
 def get_min_notional(symbol, filters_dict):
@@ -256,26 +232,18 @@ def trading_loop():
                 for b in balances_reales
             }
 
-            # 🧹 Limpiar posiciones simuladas y base de datos que ya no tienen saldo real
-            with SessionLocal() as db_limpieza:
-                for symbol, pos in list(simulator.positions.items()):
-                    base_asset = symbol.replace("USDT", "")
-                    saldo_real = saldo_real_dict.get(base_asset, 0.0)
-                    if saldo_real == 0:
-                        if pos.quantity > 0 or pos.average_price > 0:
-                            print(f"🧹 Limpiando simulador y BD: sin saldo real para {symbol}, reseteando posición")
-                            pos.quantity = 0.0
-                            pos.average_price = 0.0
-
-                            # Limpiar también en la base de datos
-                            portafolio = db_limpieza.query(models.Portfolio).filter(
-                                models.Portfolio.usuario_id == contexto.usuario_id,
-                                models.Portfolio.nombre == symbol
-                            ).first()
-
-                            if portafolio:
-                                portafolio.balance_inicial = 0.0
-                                db_limpieza.commit()
+            # ── Unico punto donde se decide el modo (P0-15) ──────────────────
+            # A partir de aqui el bucle no vuelve a preguntar si es PAPER o
+            # LIVE. CarteraPaper ni siquiera admite saldos del broker, asi que
+            # una posicion simulada no puede ser alterada por ellos.
+            cartera = construir_cartera(
+                modo_real=settings.MODO_REAL,
+                simulador=simulator,
+                usuario_id=contexto.usuario_id,
+                saldos_broker=saldo_real_dict,
+                usdt_broker=saldo_real_dict.get("USDT", 0.0),
+            )
+            print(f"[CARTERA] modo={cartera.modo} capital={cartera.capital_disponible():.2f} USDT")
 
             activos_para_gpt = []
             symbols_a_precio = [a["symbol"] for a in activos_evaluar if a["type"] == "crypto"]
@@ -296,18 +264,12 @@ def trading_loop():
 
                 precios_actuales[symbol] = precio
 
-                # Calcular cantidad real detectada
-                base_asset = symbol.replace("USDT", "")
-                saldo_detectado = saldo_real_dict.get(base_asset, 0.0)
-
-                # Obtener posición en el simulador si existe
-                position_sim = simulator.positions.get(symbol)
-                posicion_qty = position_sim.quantity if position_sim else 0.0
-                balance_detected = saldo_detectado > 0
-                position_detected = posicion_qty > 0
-
-                # Si no hay saldo, usar cantidad en simulador (si existe)
-                qty = saldo_detectado if saldo_detectado > 0 else posicion_qty
+                # La cantidad la da SIEMPRE la cartera del modo activo: en
+                # PAPER el libro simulado, en LIVE el saldo del exchange.
+                # Nunca se combinan las dos fuentes (P0-15).
+                qty = cartera.cantidad_disponible(symbol)
+                position_detected = qty > 0
+                balance_detected = position_detected
 
                 # Coste base leido de la BD en ESTA iteracion, no en el arranque.
                 avg_price = contexto.estado.get(symbol, {}).get("precio_promedio", 0.0)
@@ -412,12 +374,8 @@ def trading_loop():
 
                     # Estado de riesgo FRESCO por decision: la exposicion puede
                     # cambiar dentro del propio ciclo si se ejecutan varias
-                    # ordenes. Se reconstruye desde operaciones confirmadas.
-                    estado_riesgo = (
-                        calcular_estado_riesgo(contexto.usuario_id)
-                        if settings.MODO_REAL
-                        else calcular_estado_riesgo_paper(simulator)
-                    )
+                    # ordenes. Cada cartera sabe cual es SU fuente de verdad.
+                    estado_riesgo = cartera.estado_riesgo()
 
                     # base_quantity viene del modelo y NO ES AUTORITATIVA para
                     # el tamano: el motor lo recalcula desde cero.
@@ -428,7 +386,7 @@ def trading_loop():
                     )
                     veredicto = motor_riesgo.evaluar(
                         propuesta,
-                        capital_disponible=capital_disponible_actual(usdt_disponible),
+                        capital_disponible=cartera.capital_disponible(),
                         estado=estado_riesgo,
                     )
 
@@ -438,44 +396,20 @@ def trading_loop():
                                                  noticias=noticias_str)
                         continue
 
-                    if lado is Lado.COMPRA:
-                        if settings.MODO_REAL:
-                            # LIVE: persiste solo tras confirmacion del broker.
-                            ejecucion = ejecutar_y_registrar_compra(
-                                trader=real_trader, usuario_id=contexto.usuario_id,
-                                symbol=symbol,
-                                quote_amount=veredicto.approved_quote_amount,
-                                precio_referencia=precio_actual,
-                            )
-                            if not ejecucion.success:
-                                print(f"⛔ COMPRA {symbol} NO registrada: {ejecucion}")
-                        else:
-                            # PAPER: solo el libro en memoria. Nunca toca la BD.
-                            simulator.simulate_trade(symbol, "COMPRAR", precio_actual,
-                                                     veredicto.approved_base_quantity)
-                    else:
-                        if settings.MODO_REAL:
-                            ejecucion = ejecutar_y_registrar_venta(
-                                trader=real_trader, usuario_id=contexto.usuario_id,
-                                symbol=symbol,
-                                base_quantity=veredicto.approved_base_quantity,
-                                precio_referencia=precio_actual,
-                            )
-                            if not ejecucion.success:
-                                print(f"⛔ VENTA {symbol} NO registrada: {ejecucion}")
-                        else:
-                            simulator.simulate_trade(symbol, "VENDER", precio_actual,
-                                                     veredicto.approved_base_quantity)
+                    # Un unico punto de ejecucion para ambos modos. La cartera
+                    # decide si es un apunte en memoria o una orden real
+                    # persistida tras confirmacion del broker.
+                    ejecucion = cartera.ejecutar(veredicto, precio_actual,
+                                                 trader=real_trader)
+                    if not ejecucion.success:
+                        print(f"⛔ {decision} {symbol} NO registrada: {ejecucion}")
 
                 elif decision == "ESPERAR":
-                    # En modo real, también considerar si hay saldo real
-                    base_asset = symbol.replace("USDT", "")
-                    saldo_real = saldo_real_dict.get(base_asset, 0.0)
-                    simulador_pos = simulator.positions.get(symbol)
-                    qty_simulador = simulador_pos.quantity if simulador_pos else 0.0
-
-                    if qty_simulador <= 0 and saldo_real <= 0:
-                        print(f"⛔ ESPERAR ignorado: no hay posición ni saldo real para {symbol}")
+                    # Una unica fuente, la de la cartera activa. Antes se
+                    # consultaban a la vez el saldo del broker y el simulador.
+                    if cartera.cantidad_disponible(symbol) <= 0:
+                        print(f"⛔ ESPERAR ignorado: no hay posicion en {symbol} "
+                              f"segun la cartera {cartera.modo}")
                         continue
 
                 simulator.latest_decisions[symbol] = decision
