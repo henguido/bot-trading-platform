@@ -1,9 +1,60 @@
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import Dict
+from typing import Dict, NamedTuple, Optional
 from backend.app import models
+from backend.app.database import SessionLocal
 from sqlalchemy import func
 import json
+
+
+class ContextoUsuario(NamedTuple):
+    """
+    Estado financiero persistente del usuario activo, leido de la BASE DE DATOS.
+
+    La base de datos es la UNICA fuente de verdad del estado persistente. El
+    Simulator es un libro en memoria para modo PAPER y no debe usarse para
+    reconstruir el coste base: existen varias instancias de Simulator en el
+    proyecto y ninguna esta sincronizada con las demas.
+
+    `usuario_id is None` representa el estado NORMAL de "todavia no hay
+    usuarios registrados". No es una condicion de error.
+    """
+    usuario_id: Optional[int]
+    estado: Dict[str, Dict[str, float]]
+    ultimos_movimientos: Dict[str, str]
+    ultimos_precios_venta: Dict[str, float]
+
+
+def cargar_contexto_usuario(session_factory=SessionLocal) -> ContextoUsuario:
+    """
+    Devuelve el contexto financiero fresco del usuario activo.
+
+    Usa una sesion CORTA: se abre aqui, se lee todo y se cierra al salir del
+    with. No se mantiene ninguna sesion viva entre iteraciones del bot.
+
+    `session_factory` se inyecta para poder probar contra SQLite en memoria.
+    """
+    with session_factory() as db:
+        usuario = (
+            db.query(models.User)
+            .order_by(models.User.id.asc())
+            .first()
+        )
+        if usuario is None:
+            # Estado normal, no excepcional: aun no hay nadie registrado.
+            return ContextoUsuario(
+                usuario_id=None,
+                estado={},
+                ultimos_movimientos={},
+                ultimos_precios_venta={},
+            )
+
+        return ContextoUsuario(
+            usuario_id=usuario.id,
+            estado=cargar_estado_portafolio(db, usuario.id),
+            ultimos_movimientos=obtener_ultimo_movimiento(db, usuario.id),
+            ultimos_precios_venta=obtener_ultimo_precio_venta(db, usuario.id),
+        )
 
 def guardar_transaccion_real(db: Session, usuario_id: int, symbol: str, action: str, price: float, quantity: float):
     # 1. Buscar o crear activo

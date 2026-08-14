@@ -6,7 +6,7 @@ from backend.app.database import engine, SessionLocal
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.connectors.apis.openai_connector import OpenAIConnector
 from backend.connectors.stocks.alpaca_connector import AlpacaConnector
-from backend.simulation.simulator import Simulator, CryptoPosition
+from backend.simulation.simulator import Simulator
 from backend.config import settings
 from backend.app.schemas import UserCreate
 from datetime import datetime
@@ -20,13 +20,14 @@ from backend.app.services.real_trading import (
     cargar_estado_portafolio,
     guardar_transaccion_real,
     guardar_auditoria_decision,
-    obtener_ultimo_precio_venta 
+    obtener_ultimo_precio_venta,
+    cargar_contexto_usuario,
 )
 from backend.routes import transacciones_routes, binance_routes
 from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 import time
-import threading, pytz
+import threading, pytz, traceback
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -58,22 +59,25 @@ alpaca = AlpacaConnector()
 news_connector = NewsConnector()
 real_trader = RealTradingConnector()
 
-# Cargar estado del primer usuario registrado (asumido como activo)
-with SessionLocal() as db:
-    primer_usuario = db.query(models.User).order_by(models.User.id.asc()).first()
-    if primer_usuario:
-        usuario_id = primer_usuario.id
-        estado = cargar_estado_portafolio(db, usuario_id)
-        ultimos_movimientos = obtener_ultimo_movimiento(db, usuario_id)
-        ultimos_precios_venta = obtener_ultimo_precio_venta(db, usuario_id)
-        for symbol, info in estado.items():
-            if symbol not in simulator.positions:
-                simulator.positions[symbol] = CryptoPosition()
-            simulator.positions[symbol].quantity = info["cantidad"]
-            simulator.positions[symbol].average_price = info["precio_promedio"]
-    else:
-        print("⚠️ No hay usuarios registrados. Solo disponible el endpoint /signup.")
-        usuario_id = None
+# ─────────────────────────────────────────────────────────────────────────────
+# P0-4 / P0-5
+#
+# Aqui habia un bloque que leia el estado del portafolio UNA SOLA VEZ, al
+# importar el modulo, y lo dejaba en las globales `usuario_id`, `estado`,
+# `ultimos_movimientos` y `ultimos_precios_venta`. Producia dos fallos:
+#
+#   P0-4: si no habia usuarios al arrancar, tres de esas globales no llegaban
+#         a definirse. Si alguien se registraba despues, el bucle lanzaba
+#         NameError en cada iteracion.
+#   P0-5: si si habia usuario, el precio promedio quedaba congelado en el valor
+#         del arranque para siempre, asi que el bot nunca conocia su coste base.
+#
+# El bloque no se ha reinicializado: se ha SUPRIMIDO. El estado persistente
+# vive ahora exclusivamente en la base de datos y se lee fresco en cada
+# iteracion mediante cargar_contexto_usuario(). Tampoco se siembran las
+# posiciones del Simulator desde la BD: el Simulator es un libro en memoria
+# para PAPER, no una fuente de estado persistente.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def priorizar_activos_por_importancia(activos):
@@ -95,12 +99,28 @@ def trading_loop():
     EVALUAR_CADA_N_CICLOS = 2  # Puedes ajustar este valor
     noticias_cache = None
     timestamp_cache = None
-    binance.init_client()
-    exchange_info = binance.client.get_exchange_info()
-    filters_dict = {s["symbol"]: s["filters"] for s in exchange_info["symbols"]}
+    # Los filtros del exchange se piden de forma perezosa: si todavia no hay
+    # usuario no hace falta contactar con Binance.
+    filters_dict = None
 
     while True:
         try:
+            # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────
+            contexto = cargar_contexto_usuario()
+
+            # La ausencia de usuario es un estado normal, no un error (P0-4).
+            # El bot espera y se reincorpora solo en cuanto alguien se registre.
+            if contexto.usuario_id is None:
+                print("[BOT] Sin usuarios registrados todavia. "
+                      "Esperando a que alguien complete /signup...")
+                time.sleep(settings.WAIT_TIME)
+                continue
+
+            if filters_dict is None:
+                binance.init_client()
+                exchange_info = binance.client.get_exchange_info()
+                filters_dict = {s["symbol"]: s["filters"] for s in exchange_info["symbols"]}
+
             ahora = datetime.now()
             minuto_actual = ahora.minute
 
@@ -180,7 +200,7 @@ def trading_loop():
 
                             # Limpiar también en la base de datos
                             portafolio = db_limpieza.query(models.Portfolio).filter(
-                                models.Portfolio.usuario_id == usuario_id,
+                                models.Portfolio.usuario_id == contexto.usuario_id,
                                 models.Portfolio.nombre == symbol
                             ).first()
 
@@ -220,9 +240,10 @@ def trading_loop():
                 # Si no hay saldo, usar cantidad en simulador (si existe)
                 qty = saldo_detectado if saldo_detectado > 0 else posicion_qty
 
-                avg_price = estado.get(symbol, {}).get("precio_promedio", 0.0)
-                last_movement = ultimos_movimientos.get(symbol)
-                last_sell_price = ultimos_precios_venta.get(symbol)
+                # Coste base leido de la BD en ESTA iteracion, no en el arranque.
+                avg_price = contexto.estado.get(symbol, {}).get("precio_promedio", 0.0)
+                last_movement = contexto.ultimos_movimientos.get(symbol)
+                last_sell_price = contexto.ultimos_precios_venta.get(symbol)
 
                 activos_para_gpt.append({
                     "symbol": symbol,
@@ -331,7 +352,7 @@ def trading_loop():
                             real_trader.comprar(symbol, cantidad_usdt=precio_actual * quantity)
                             simulator.simulate_trade(symbol, "COMPRAR", precio_actual, quantity)
                             with SessionLocal() as db:
-                                guardar_transaccion_real(db, usuario_id=usuario_id, symbol=symbol, action="COMPRAR", price=precio_actual, quantity=quantity)
+                                guardar_transaccion_real(db, usuario_id=contexto.usuario_id, symbol=symbol, action="COMPRAR", price=precio_actual, quantity=quantity)
                         except Exception as e:
                             print(f"⚠️ Error en compra real: {e}")
                     else:
@@ -344,7 +365,7 @@ def trading_loop():
                             real_trader.vender(symbol, cantidad_usdt=precio_actual * quantity)
                             simulator.simulate_trade(symbol, "VENDER", precio_actual, quantity)
                             with SessionLocal() as db:
-                                guardar_transaccion_real(db, usuario_id=usuario_id, symbol=symbol, action="VENDER", price=precio_actual, quantity=quantity)
+                                guardar_transaccion_real(db, usuario_id=contexto.usuario_id, symbol=symbol, action="VENDER", price=precio_actual, quantity=quantity)
                         except Exception as e:
                             print(f"⚠️ Error en venta real: {e}")
                     else:
@@ -396,14 +417,16 @@ def trading_loop():
 
 
         except Exception as e:
-            print(f"❌ Error inesperado en ciclo de trading: {e}")
+            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses.
+            print(f"❌ Error inesperado en ciclo de trading: {type(e).__name__}: {e}")
+            traceback.print_exc()
             time.sleep(settings.WAIT_TIME)
             ciclo += 1
 
-if usuario_id is not None:
-    threading.Thread(target=trading_loop, daemon=True).start()
-else:
-    print("⏳ Bot desactivado porque no hay usuario registrado.")
+
+# El hilo arranca SIEMPRE. Si aun no hay usuarios, el propio bucle lo trata
+# como estado normal y espera; ya no hace falta relanzarlo desde /signup.
+threading.Thread(target=trading_loop, daemon=True).start()
 
 # Rutas
 @app.get("/api/historial")
@@ -444,9 +467,12 @@ def resumen_portafolio(current_user: models.User = Depends(get_current_user)):
     resumen = []
     ganancia_total = 0.0
 
-    # Obtener precios promedio desde la BD
-    with SessionLocal() as db:
-        estado = cargar_estado_portafolio(db, usuario_id=usuario_id)
+    # Coste base leido de la BD, de la MISMA fuente que usa el bot, para que
+    # el resumen y las decisiones nunca discrepen.
+    # NOTA: el balance de Binance es de una unica cuenta compartida, asi que
+    # este endpoint es inherentemente monousuario. La separacion por usuario
+    # sigue pendiente (ver riesgo A-4 de la auditoria).
+    estado = cargar_contexto_usuario().estado
 
     for b in balances:
         asset = b["asset"]
@@ -509,8 +535,6 @@ def login(form_data: dict = Body(...), db: Session = Depends(get_db)):
 
 @app.post("/signup")
 def signup(form_data: UserCreate, db: Session = Depends(get_db)):
-    global usuario_id  # necesario para modificar la variable global
-
     if db.query(models.User).filter(models.User.email == form_data.email).first():
         raise HTTPException(status_code=400, detail="El usuario ya existe")
 
@@ -524,11 +548,10 @@ def signup(form_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(nuevo_usuario)
 
-    # ✅ Activar ciclo si no estaba corriendo aún
-    if usuario_id is None:
-        usuario_id = nuevo_usuario.id
-        print(f"🟢 Primer usuario registrado. Iniciando ciclo de trading para usuario_id={usuario_id}...")
-        threading.Thread(target=trading_loop, daemon=True).start()
-
+    # Ya no se arranca ningun hilo aqui. El bucle corre siempre y detecta al
+    # nuevo usuario por si mismo en la siguiente iteracion, leyendo la BD.
+    # Antes, este arranque tardio dejaba sin definir estado/ultimos_* y el
+    # bucle moria con NameError en cada ciclo (P0-4). Ademas, dos altas
+    # simultaneas podian lanzar dos hilos de trading a la vez.
     return {"mensaje": "Usuario creado correctamente", "usuario_id": nuevo_usuario.id}
 
