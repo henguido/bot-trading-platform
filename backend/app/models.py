@@ -1,7 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.database import Base
+from backend.app.database import Base
+from sqlalchemy import Text
 
 class User(Base):
     __tablename__ = "usuarios"
@@ -44,3 +45,18 @@ class Transaction(Base):
     fecha_operacion = Column(DateTime, default=datetime.utcnow)
 
     portafolio = relationship("Portfolio", back_populates="transacciones")
+    activo = relationship("Asset")  # ✅ Añadir esta línea
+
+class DecisionAudit(Base):
+    __tablename__ = "decision_audit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True)
+    action = Column(String)
+    quantity = Column(Float)
+    price = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    sentimiento = Column(String)
+    noticias = Column(Text)
+    risk_score = Column(Float)
+    decision_gpt = Column(Text)  # JSON como texto por simplicidad

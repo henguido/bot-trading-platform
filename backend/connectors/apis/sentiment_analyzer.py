@@ -1,7 +1,7 @@
 # connectors/apis/sentiment_analyzer.py
 
 import requests
-from config import settings
+from backend.config import settings
 
 class SentimentAnalyzer:
     def __init__(self):

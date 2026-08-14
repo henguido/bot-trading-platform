@@ -10,10 +10,10 @@ function SignupPage() {
 
   const handleSignup = async (e) => {
     e.preventDefault();
-    setErrorMsg("");
+    setErrorMsg("");  // Limpiar cualquier error previo
 
     try {
-      const response = await fetch("https://bot-trading-backend.onrender.com/signup", {
+      const response = await fetch("http://localhost:8000/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nombre, email, password }),
@@ -24,11 +24,26 @@ function SignupPage() {
         throw new Error(data.detail || "Error al registrarse");
       }
 
-      const data = await response.json();
-      localStorage.setItem("token", data.access_token);
-      navigate("/dashboard");
+      // El registro fue exitoso, ahora hacemos login automático
+      const loginResponse = await fetch("http://localhost:8000/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (loginResponse.ok) {
+        const loginData = await loginResponse.json();
+        localStorage.setItem("token", loginData.access_token);
+        localStorage.setItem("user_name", nombre); // ✅ Guardamos el nombre
+        navigate("/dashboard");
+      } else {
+        setErrorMsg("Usuario creado, pero error al iniciar sesión.");
+        navigate("/login");
+      }
     } catch (err) {
-      setErrorMsg(err.message || "Ocurrió un error");
+      setErrorMsg(err.message || "Ocurrió un error al registrar.");
     }
   };
 
