@@ -18,7 +18,11 @@ from alembic.config import Config
 
 RAIZ = Path(__file__).resolve().parents[1]
 BASELINE = "0001_baseline"
-HEAD = "0002_ordenes"
+# Se deriva del repositorio en vez de fijarse a mano: asi anadir una migracion
+# no obliga a tocar estas pruebas ni las deja comprobando una revision vieja.
+from backend.esquema import revision_esperada  # noqa: E402
+
+HEAD = revision_esperada()
 
 
 def _alembic(url):

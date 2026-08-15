@@ -171,20 +171,38 @@ def test_3_reconciliador_descubre_el_fill_perdido(fabrica, usuario, monkeypatch)
 
 
 # ═══ 4 · El broker NO conoce el client_order_id ══════════════════════════════
-def test_4_broker_no_conoce_la_orden_se_resuelve_como_no_ejecutada(
+def test_4_broker_no_conoce_la_orden_NO_se_concluye_no_ejecutada(
         fabrica, usuario, monkeypatch):
+    """
+    P0-17 cambio este contrato a proposito.
+
+    Antes, una consulta negativa marcaba la orden como NO_EJECUTADA. En una
+    operacion asincrona esa respuesta puede significar solo que el broker aun no
+    ha propagado la orden; darla por inexistente y seguir comprando duplicaria
+    una posicion real. Ahora se agotan los intentos y queda en un estado NO
+    terminal que sigue bloqueando exposicion.
+    """
+    from backend.reconciliacion import PoliticaBackoff
+
     cli = ClienteFalso(fallo_envio=TimeoutError("timeout"), orden_en_broker=None)
     trader = conector(cli, monkeypatch)
 
     ejecutar_y_registrar_compra(trader=trader, usuario_id=usuario, symbol=SIMBOLO,
                                 quote_amount=100.0, session_factory=fabrica)
-    reconciliar_pendientes(trader, usuario_id=usuario, session_factory=fabrica)
+    from datetime import datetime, timedelta
+    momento = [datetime(2026, 8, 14, 12, 0, 0)]
+    pol = PoliticaBackoff(intentos_maximos=2)
+    for _ in range(pol.intentos_maximos):
+        reconciliar_pendientes(trader, usuario_id=usuario, session_factory=fabrica,
+                               politica=pol, ahora=lambda: momento[0])
+        momento[0] += timedelta(seconds=pol.espera_maxima_s + 1)
 
     with fabrica() as db:
         orden = db.query(models.Orden).first()
-        assert orden.estado == EstadoOrden.NO_EJECUTADA.value, \
-            "si el broker no conoce NUESTRO id, la orden nunca se creo"
-        assert "nunca se creo" in (orden.error or "")
+        assert orden.estado != EstadoOrden.NO_EJECUTADA.value, \
+            "una consulta negativa NO es evidencia de que la orden no exista"
+        assert orden.estado == EstadoOrden.RECONCILIACION_MANUAL_REQUERIDA.value
+        assert not es_terminal(orden.estado), "debe seguir bloqueando exposicion"
         assert db.query(models.Transaction).count() == 0
 
 
@@ -194,12 +212,16 @@ def test_4b_si_no_se_puede_consultar_sigue_desconocida(fabrica, usuario, monkeyp
         def get_order(self, symbol, origClientOrderId=None):
             raise ConnectionError("tampoco hay red para consultar")
 
+    from backend.reconciliacion import PoliticaBackoff
+
     cli = ClienteSinConsulta(fallo_envio=TimeoutError("timeout"))
     trader = conector(cli, monkeypatch)
     ejecutar_y_registrar_compra(trader=trader, usuario_id=usuario, symbol=SIMBOLO,
                                 quote_amount=100.0, session_factory=fabrica)
-    resumen = reconciliar_pendientes(trader, usuario_id=usuario, session_factory=fabrica)
 
+    # Con un solo intento la orden ni siquiera agota la reconciliacion.
+    resumen = reconciliar_pendientes(trader, usuario_id=usuario, session_factory=fabrica,
+                                     politica=PoliticaBackoff(intentos_maximos=3))
     assert resumen.sin_resolver == 1
     assert resumen.hay_incertidumbre is True
     with fabrica() as db:

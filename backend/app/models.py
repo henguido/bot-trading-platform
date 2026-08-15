@@ -81,6 +81,11 @@ class Orden(Base):
     estado = Column(String(32), nullable=False, index=True)
     error = Column(Text, nullable=True)
 
+    # Persistido a proposito: si viviera en memoria, reiniciar el proceso
+    # reabriria los intentos y la orden nunca alcanzaria el estado de
+    # reconciliacion manual (P0-17).
+    intentos_reconciliacion = Column(Integer, default=0, nullable=False)
+    ultimo_intento_en = Column(DateTime, nullable=True)
     creada_en = Column(DateTime, default=datetime.utcnow, nullable=False)
     actualizada_en = Column(DateTime, default=datetime.utcnow,
                             onupdate=datetime.utcnow, nullable=False)

@@ -47,6 +47,9 @@ class EstadoOrden(str, Enum):
     ENVIANDO = "ENVIANDO"                    # POST en vuelo
     ESTADO_DESCONOCIDO = "ESTADO_DESCONOCIDO"  # pudo ejecutarse; hay que preguntar
     PARCIAL = "PARCIAL"                      # fill parcial confirmado
+    # Agotados los intentos automaticos sin evidencia concluyente. NO equivale a
+    # NO_EJECUTADA: sigue bloqueando nueva exposicion y exige intervencion.
+    RECONCILIACION_MANUAL_REQUERIDA = "RECONCILIACION_MANUAL_REQUERIDA"
 
     EJECUTADA = "EJECUTADA"                  # fill confirmado y completo
     NO_EJECUTADA = "NO_EJECUTADA"            # el broker acepto y no lleno nada
@@ -68,7 +71,28 @@ ESTADOS_TERMINALES = frozenset({
 ESTADOS_NO_TERMINALES = frozenset({
     EstadoOrden.CREADA, EstadoOrden.ENVIANDO,
     EstadoOrden.ESTADO_DESCONOCIDO, EstadoOrden.PARCIAL,
+    EstadoOrden.RECONCILIACION_MANUAL_REQUERIDA,
 })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUE EVIDENCIA PERMITE UN ESTADO TERMINAL  (P0-17)
+#
+# La ausencia de evidencia NO es evidencia de no ejecucion. Un GET que responde
+# "no encontrada" puede significar simplemente que el broker aun no ha
+# propagado la orden. Solo estas evidencias son suficientes:
+#
+#   ERROR_PRE_ENVIO  el fallo ocurrio antes de que el POST pudiera salir. Es la
+#                    unica certeza que se obtiene sin preguntar al broker.
+#   RECHAZADA        el broker informa status=REJECTED de forma explicita.
+#   CANCELADA        el broker informa status=CANCELED / PENDING_CANCEL.
+#   EXPIRADA         el broker informa status=EXPIRED / EXPIRED_IN_MATCH.
+#   NO_EJECUTADA     el broker DEVUELVE la orden y declara executedQty == 0 en
+#                    un estado ya cerrado. Nunca por una consulta negativa.
+#   EJECUTADA        el broker confirma executedQty > 0.
+#
+# Cualquier otro desenlace deja la orden en un estado NO terminal, que bloquea
+# nueva exposicion. Preferimos detener compras a duplicar una posicion real.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def es_terminal(estado) -> bool:
