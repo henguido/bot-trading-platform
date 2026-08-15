@@ -37,7 +37,19 @@ from contextlib import asynccontextmanager
 import time
 import pytz, traceback
 
-models.Base.metadata.create_all(bind=engine)
+# ─────────────────────────────────────────────────────────────────────────────
+# P0-16 · ALEMBIC ES LA UNICA AUTORIDAD DEL ESQUEMA
+#
+# Aqui habia un models.Base.metadata.create_all(bind=engine) que se ejecutaba
+# AL IMPORTAR el modulo. Con DATABASE_URL apuntando a produccion, un simple
+# `import backend.main` (o arrancar uvicorn) abria conexion contra Render y
+# habria creado alli las tablas `ordenes` y `fills` FUERA de Alembic: la base
+# habria quedado con el esquema nuevo pero sin fila en alembic_version, y el
+# procedimiento `stamp 0001_baseline` ya no encajaria.
+#
+# El codigo de aplicacion NO modifica el esquema. Migrar es una operacion
+# explicita de despliegue:  alembic upgrade head
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
@@ -506,7 +518,16 @@ def health():
         "bucle_activo": coordinador.activo,
         "es_lider": coordinador.es_lider,
         "motivo_inactivo": coordinador.motivo_inactivo or None,
+        # Solo INFORMA. La app nunca migra por su cuenta (P0-16).
+        "esquema": _estado_esquema_serializado(),
     }
+
+
+def _estado_esquema_serializado():
+    from backend.esquema import estado_esquema
+    e = estado_esquema()
+    return {"estado": e.estado, "revision_actual": e.revision_actual,
+            "revision_esperada": e.revision_esperada, "detalle": e.detalle}
 
 # Rutas
 @app.get("/api/historial")
