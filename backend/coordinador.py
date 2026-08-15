@@ -146,10 +146,15 @@ class CoordinadorTrading:
     varias veces no crea hilos adicionales.
     """
 
-    def __init__(self, objetivo, candado=None, nombre="trading-loop"):
+    def __init__(self, objetivo, candado=None, nombre="trading-loop",
+                 precondiciones=()):
         self._objetivo = objetivo
         self._candado = candado
         self._nombre = nombre
+        # Cada precondicion es un callable que devuelve (ok: bool, motivo: str).
+        # Se evaluan ANTES de pedir el candado: un proceso que no puede operar
+        # no debe retener el liderazgo y bloquear a otro que si podria.
+        self._precondiciones = tuple(precondiciones)
         self._hilo = None
         self._mutex = threading.Lock()
         self.es_lider = False
@@ -164,6 +169,18 @@ class CoordinadorTrading:
         with self._mutex:
             if self.activo:
                 return True                     # ya somos lider: no duplicar
+
+            # Fallo cerrado: si una precondicion no se cumple, no se opera.
+            # Se comprueba antes del candado para no retener el liderazgo.
+            for verificar in self._precondiciones:
+                ok, motivo = verificar()
+                if not ok:
+                    self.es_lider = False
+                    self.motivo_inactivo = motivo
+                    print(f"[COORDINADOR] Precondicion no cumplida: {motivo} "
+                          f"Este proceso NO operara.")
+                    return False
+
             if self._candado is not None and not self._candado.adquirir():
                 self.es_lider = False
                 self.motivo_inactivo = (

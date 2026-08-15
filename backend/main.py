@@ -503,9 +503,33 @@ def trading_loop():
 # liderazgo. Con --reload o --workers N, solo uno opera; los demas lo registran
 # y se quedan sirviendo la API.
 # ─────────────────────────────────────────────────────────────────────────────
+def _precondicion_esquema():
+    """
+    El bucle NO arranca si el esquema no esta alineado con las migraciones.
+
+    Fallo cerrado: operar contra una base cuyo esquema no conocemos podria
+    escribir transacciones u ordenes en tablas que no existen o que tienen otra
+    forma. Con MODO_REAL=True eso significaria dinero real sobre un ledger que
+    no podemos garantizar. La API si arranca, para permitir diagnostico.
+
+    Esta comprobacion SOLO LEE: nunca aplica una migracion.
+    """
+    from backend.esquema import ALINEADO, estado_esquema
+
+    e = estado_esquema()
+    if e.estado == ALINEADO:
+        return True, ""
+    return False, (
+        f"esquema no alineado [{e.estado}] actual={e.revision_actual} "
+        f"esperada={e.revision_esperada}. {e.detalle or ''} "
+        f"Migrar es una operacion explicita de despliegue: alembic upgrade head."
+    )
+
+
 coordinador = CoordinadorTrading(
     objetivo=trading_loop,
     candado=candado_por_defecto(settings.DATABASE_URL),
+    precondiciones=(_precondicion_esquema,),
 )
 
 
