@@ -1,11 +1,106 @@
+"""
+Fuente CANONICA de configuracion.
+
+Es el unico modulo que llama a load_dotenv() y el unico que interpreta
+variables de entorno del proyecto. Cualquier otro modulo importa de aqui.
+"""
 from dotenv import load_dotenv
 import math
 import os
+from urllib.parse import urlsplit
 
 load_dotenv()
 
-# 🔗 URL de la base de datos
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./backend/app.db')  # valor por defecto
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lectores validados
+# ─────────────────────────────────────────────────────────────────────────────
+def _leer_float(nombre, defecto, *, minimo=None, maximo=None, alias=None):
+    bruto = os.getenv(nombre)
+    if bruto is None and alias:
+        bruto = os.getenv(alias)          # compatibilidad con el nombre antiguo
+    if bruto is None or not str(bruto).strip():
+        return defecto
+    try:
+        valor = float(bruto)
+    except (TypeError, ValueError):
+        raise RuntimeError(f"{nombre} debe ser numerico, se recibio {bruto!r}")
+    if not math.isfinite(valor):
+        raise RuntimeError(f"{nombre} debe ser finito, se recibio {bruto!r}")
+    if minimo is not None and valor < minimo:
+        raise RuntimeError(f"{nombre}={valor} es menor que el minimo permitido {minimo}")
+    if maximo is not None and valor > maximo:
+        raise RuntimeError(f"{nombre}={valor} supera el maximo permitido {maximo}")
+    return valor
+
+
+def _leer_int(nombre, defecto, *, minimo=None, maximo=None):
+    valor = _leer_float(nombre, float(defecto), minimo=minimo, maximo=maximo)
+    if valor != int(valor):
+        raise RuntimeError(f"{nombre} debe ser un entero, se recibio {valor!r}")
+    return int(valor)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTORNO DE EJECUCION
+#
+# development  desarrollo local. Por defecto usa SQLite. Conectarse a una base
+#              REMOTA exige autorizacion explicita.
+# test         pruebas automatizadas.
+# production   despliegue. DATABASE_URL es obligatoria y sin valor por defecto.
+#
+# Invariante: abrir el proyecto localmente nunca debe conectar en silencio a
+# produccion.
+# ─────────────────────────────────────────────────────────────────────────────
+ENTORNOS_VALIDOS = ('development', 'test', 'production')
+APP_ENV = os.getenv('APP_ENV', 'development').strip().lower() or 'development'
+if APP_ENV not in ENTORNOS_VALIDOS:
+    raise RuntimeError(
+        f"APP_ENV={APP_ENV!r} no es valido. Usa uno de: {', '.join(ENTORNOS_VALIDOS)}")
+
+ES_PRODUCCION = APP_ENV == 'production'
+
+# Autorizacion deliberada para apuntar a una base remota desde desarrollo.
+VAR_BD_REMOTA = 'PERMITIR_BD_REMOTA_EN_DESARROLLO'
+_BD_REMOTA_AUTORIZADA = os.getenv(VAR_BD_REMOTA, '').strip().lower() in ('1', 'true', 'si', 'yes')
+
+HOSTS_LOCALES = ('localhost', '127.0.0.1', '::1', '')
+
+
+def es_url_remota(url: str) -> bool:
+    """
+    Determina de forma GENERICA si una URL apunta fuera de la maquina local.
+
+    No busca proveedores concretos: cualquier host que no sea sqlite ni un
+    nombre local cuenta como remoto. Asi la proteccion sigue funcionando si
+    manana cambiamos de proveedor.
+    """
+    if not url:
+        return False
+    partes = urlsplit(url)
+    if partes.scheme.startswith('sqlite'):
+        return False
+    return (partes.hostname or '') not in HOSTS_LOCALES
+
+
+DATABASE_URL_POR_DEFECTO_LOCAL = 'sqlite:///./backend/app.db'
+
+_bruto_bd = os.getenv('DATABASE_URL')
+
+if ES_PRODUCCION:
+    if not _bruto_bd or not _bruto_bd.strip():
+        raise RuntimeError(
+            "APP_ENV=production exige DATABASE_URL definida en el entorno del "
+            "servicio. No existe valor por defecto en produccion.")
+    DATABASE_URL = _bruto_bd.strip()
+else:
+    DATABASE_URL = (_bruto_bd or '').strip() or DATABASE_URL_POR_DEFECTO_LOCAL
+    if es_url_remota(DATABASE_URL) and not _BD_REMOTA_AUTORIZADA:
+        raise RuntimeError(
+            f"APP_ENV={APP_ENV} pero DATABASE_URL apunta a una base REMOTA. "
+            f"Fallo seguro: abrir el proyecto localmente no debe conectar a "
+            f"produccion sin querer. Usa {DATABASE_URL_POR_DEFECTO_LOCAL} o, si "
+            f"de verdad necesitas la remota, define {VAR_BD_REMOTA}=true.")
 
 # 🔒 API Keys
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
@@ -30,11 +125,14 @@ ALPACA_FEED = os.getenv('ALPACA_FEED', 'iex')
 # Feed de NEWS API
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
-# 🧠 Modelo de OpenAI
-OPENAI_MODEL = "gpt-4o-2024-08-06"
+# Modelo de OpenAI. Se lee del entorno; el default conserva el modelo actual
+# para no alterar el comportamiento. El cambio de proveedor/modelo corresponde
+# a la fase de optimizacion de IA, posterior a main.
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-2024-08-06').strip() or 'gpt-4o-2024-08-06'
 
-# ⏳ Tiempo de espera entre ciclos de análisis
-WAIT_TIME = 14400  # segundos
+# Tiempo entre ciclos de analisis. Unidad: SEGUNDOS.
+# Minimo 60 s para no martillear a los proveedores; maximo 7 dias.
+WAIT_TIME = _leer_int('WAIT_TIME', 14400, minimo=60, maximo=604800)
 
 # ⚙️ Configuración de Trading
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,10 +162,10 @@ if MODO_REAL:
 else:
     print("[PAPER] Modo simulacion - no se enviara ninguna orden real.")
 
-MONTO_MAXIMO_USDT = 20            # Monto máximo por operación real (en dólares)
-
-# 💰 Capital inicial para modo simulador
-INITIAL_CAPITAL_USD = 20          # Solo se usa si MODO_REAL = False
+# Capital inicial del libro PAPER. Unidad: USDT. Solo se usa con MODO_REAL=False.
+INITIAL_CAPITAL_USD = _leer_float('INITIAL_CAPITAL_USD', 20.0, minimo=0.0)
+if INITIAL_CAPITAL_USD <= 0:
+    raise RuntimeError("INITIAL_CAPITAL_USD debe ser un numero positivo")
 
 # 🌍 Configuración del servidor FastAPI
 API_HOST = "0.0.0.0"
@@ -104,7 +202,11 @@ if SECRET_KEY.strip().lower() in _CLAVES_PROHIBIDAS:
     )
 
 ALGORITHM = 'HS256'
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+# Vigencia del token de acceso. Unidad: MINUTOS. Entre 1 minuto y 24 horas:
+# una expiracion inmediata dejaria la API inusable y una demasiado larga
+# alarga la ventana de un token robado en una API con datos financieros.
+ACCESS_TOKEN_EXPIRE_MINUTES = _leer_int('ACCESS_TOKEN_EXPIRE_MINUTES', 60,
+                                        minimo=1, maximo=1440)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GESTION DE RIESGO (P0-6 / P0-8)
@@ -118,25 +220,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60')
 # del capital disponible que puede asignarse a una sola operacion. El position
 # sizing basado en stop corresponde a una fase posterior.
 # ─────────────────────────────────────────────────────────────────────────────
-def _leer_float(nombre, defecto, *, minimo=None, maximo=None, alias=None):
-    bruto = os.getenv(nombre)
-    if bruto is None and alias:
-        bruto = os.getenv(alias)          # compatibilidad con el nombre antiguo
-    if bruto is None or not str(bruto).strip():
-        return defecto
-    try:
-        valor = float(bruto)
-    except (TypeError, ValueError):
-        raise RuntimeError(f"{nombre} debe ser numerico, se recibio {bruto!r}")
-    if not math.isfinite(valor):
-        raise RuntimeError(f"{nombre} debe ser finito, se recibio {bruto!r}")
-    if minimo is not None and valor < minimo:
-        raise RuntimeError(f"{nombre}={valor} es menor que el minimo permitido {minimo}")
-    if maximo is not None and valor > maximo:
-        raise RuntimeError(f"{nombre}={valor} supera el maximo permitido {maximo}")
-    return valor
-
-
 # Tope duro por operacion individual. Unidad: USDT (activo cotizado).
 MONTO_MAXIMO_USDT = _leer_float('MONTO_MAXIMO_USDT', 20.0, minimo=0.0)
 
@@ -156,12 +239,23 @@ RISK_PER_TRADE = LIMITE_ASIGNACION_POR_OPERACION
 # RISK_PER_TRADE de 0.02) parece una FRACCION, no USDT. Interpretarlo como
 # importe absoluto dispararia el kill switch al perder cinco centimos.
 # La migracion debe ser explicita.
+#
+# En LIVE es OBLIGATORIA: operar con dinero real sin un limite de perdida
+# diaria elegido deliberadamente no es aceptable. En PAPER se admite el default.
+if MODO_REAL and not (os.getenv('MAX_DAILY_LOSS_USDT') or '').strip():
+    raise RuntimeError(
+        "MAX_DAILY_LOSS_USDT es obligatoria cuando TRADING_MODE=LIVE. "
+        "Define el limite de perdida diaria en USDT absolutos antes de operar "
+        "con dinero real. No se aplica ningun valor por defecto en LIVE.")
+
 MAX_DAILY_LOSS_USDT = _leer_float('MAX_DAILY_LOSS_USDT', 20.0, minimo=0.0)
 
+# MAX_DAILY_LOSS (nombre antiguo) queda OBSOLETO y sin alias: su unidad nunca
+# estuvo definida y los .env existentes traen 0.05, que parece una fraccion.
 if os.getenv('MAX_DAILY_LOSS') is not None and os.getenv('MAX_DAILY_LOSS_USDT') is None:
-    print("[AVISO] MAX_DAILY_LOSS existe en el entorno pero se IGNORA: su unidad "
-          "nunca estuvo definida. Define MAX_DAILY_LOSS_USDT en USDT absolutos. "
-          f"Usando el valor por defecto {MAX_DAILY_LOSS_USDT} USDT.")
+    print("[AVISO] MAX_DAILY_LOSS esta OBSOLETA y se IGNORA: su unidad nunca "
+          "estuvo definida. Define MAX_DAILY_LOSS_USDT en USDT absolutos. "
+          f"Usando el valor por defecto {20.0} USDT.")
 
 # Exposicion maxima acumulada, valorada A COSTE (suma de cantidad x precio
 # medio de cada posicion). Unidad: USDT. Impide la acumulacion ilimitada que el

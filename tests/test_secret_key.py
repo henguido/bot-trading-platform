@@ -129,6 +129,11 @@ def test_env_example_no_contiene_secretos():
         if linea.startswith("#") or "=" not in linea:
             continue
         clave, _, valor = linea.partition("=")
+        clave = clave.strip()
+        # ACCESS_TOKEN_EXPIRE_MINUTES contiene "TOKEN" pero es una duracion en
+        # minutos, no una credencial. Excepcion explicita, no relajacion global.
+        if clave == "ACCESS_TOKEN_EXPIRE_MINUTES":
+            continue
         if any(t in clave for t in ("KEY", "SECRET", "TOKEN", "PASSWORD")):
             assert valor.strip() == "", f"{clave} deberia estar vacia en la plantilla"
 
