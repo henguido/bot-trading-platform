@@ -55,7 +55,12 @@ Basado en el análisis técnico, el sentimiento del mercado y las noticias actua
 
         for grupo in [prioritarios, otros]:
             for a in grupo:
-                linea = f"{a['symbol']}: precio={a['price']}, qty={a['position_quantity']}, avg={a['average_price']}"
+                # avg=None significa que no hay coste base registrado. Se dice
+                # explicitamente: enviar 0.0 haria leer al modelo "compre a
+                # cero" en lugar de "no tengo posicion" (Fase 6).
+                medio = a.get('average_price')
+                avg = "sin_coste_base" if medio in (None, 0) else medio
+                linea = f"{a['symbol']}: precio={a['price']}, qty={a['position_quantity']}, avg={avg}"
                 if 'last_movement' in a:
                     linea += f", ult_mov={a['last_movement']}"
                 if 'last_sell_price' in a and a['last_sell_price'] is not None:

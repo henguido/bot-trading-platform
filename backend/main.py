@@ -29,6 +29,7 @@ from backend.routes import transacciones_routes, binance_routes
 from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
+from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
@@ -311,7 +312,9 @@ def trading_loop():
                 balance_detected = position_detected
 
                 # Coste base leido de la BD en ESTA iteracion, no en el arranque.
-                avg_price = contexto.estado.get(symbol, {}).get("precio_promedio", 0.0)
+                # None cuando no hay posicion registrada: enviar 0.0 al modelo
+                # le haria leer "compre a cero" en vez de "no tengo coste base".
+                avg_price = precio_medio_de(contexto.estado, symbol)
                 last_movement = contexto.ultimos_movimientos.get(symbol)
                 last_sell_price = contexto.ultimos_precios_venta.get(symbol)
 
@@ -590,7 +593,14 @@ def get_historial(
 def resumen_portafolio(current_user: models.User = Depends(get_current_user)):
     balances = binance.get_account_balance()
     resumen = []
-    ganancia_total = 0.0
+    valor_total = 0.0
+    pnl_total = None
+    pnl_total_conocido = True
+    # En PAPER el saldo del exchange no pertenece al libro simulado, asi que no
+    # tiene coste base publicable aqui. No se inventa cero.
+    motivo_sin_coste = (None if settings.MODO_REAL else
+                        "en PAPER el saldo del exchange no tiene coste base en "
+                        "el libro simulado")
 
     # Coste base leido de la BD, de la MISMA fuente que usa el bot, para que
     # el resumen y las decisiones nunca discrepen.
@@ -618,29 +628,39 @@ def resumen_portafolio(current_user: models.User = Depends(get_current_user)):
                 print(f"❌ No se pudo obtener precio para {symbol}: {e}")
                 continue
 
-        # Obtener precio promedio desde el estado
-        average_price = estado.get(symbol, {}).get("precio_promedio", 0.0)
-        pnl = (precio_actual - average_price) * total if average_price else 0.0
+        # Precio medio y P&L solo si hay coste base registrado. Sin el no hay
+        # P&L: no es cero (Fase 6).
+        medio = precio_medio_de(estado, symbol)
+        motivo = motivo_sin_coste or (None if medio is not None
+                                      else f"sin coste base registrado para {symbol}")
+        pnl = pnl_no_realizado(precio_actual, medio, total)
         valor_actual = round(total * precio_actual, 2)
 
-        resumen.append({
-            "symbol": symbol,
-            "cantidad": round(total, 6),
-            "precio_actual": round(precio_actual, 4),
-            "valor_actual": valor_actual,
-            "average_price": round(average_price, 4),
-            "pnl": round(pnl, 2)
-        })
+        fila = {"symbol": symbol, "cantidad": round(total, 6),
+                "precio_actual": round(precio_actual, 4),
+                "valor_actual": valor_actual}
+        fila.update(campos("average_price", medio, redondeo=6, motivo=motivo))
+        fila.update(campos("pnl", pnl, redondeo=2, motivo=motivo))
+        resumen.append(fila)
 
-        ganancia_total += valor_actual
+        valor_total += valor_actual
+        if pnl is None:
+            pnl_total_conocido = False
+        else:
+            pnl_total = (pnl_total or 0.0) + pnl
 
     # Mostrar USDT primero
     resumen.sort(key=lambda x: 0 if x["symbol"] == "USDT" else 1)
 
-    return {
-        "resumen": resumen,
-        "ganancia_total": round(ganancia_total, 2)
-    }
+    salida = {"modo": settings.TRADING_MODE, "resumen": resumen,
+              "valor_total_usd": round(valor_total, 2)}
+    # El campo antiguo se llamaba `ganancia_total` pero sumaba el VALOR de la
+    # cartera, no una ganancia. Se publica con su nombre correcto y el P&L real
+    # se expone aparte, con su estado.
+    salida.update(campos("pnl_total", pnl_total if pnl_total_conocido else None,
+                         redondeo=2,
+                         motivo="al menos un activo carece de coste base"))
+    return salida
 
 @app.post("/login")
 def login(form_data: dict = Body(...), db: Session = Depends(get_db)):

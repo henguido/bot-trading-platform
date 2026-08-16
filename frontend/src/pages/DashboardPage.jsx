@@ -22,16 +22,20 @@ function DashboardPage() {
           if (Array.isArray(data.resumen)) {
             const usdt = data.resumen.find((b) => b.symbol.startsWith("USDT"));
             setBalanceUSDT(usdt ? usdt.cantidad : "0.00");
+            // No se sustituye por 0 lo que la API declara NO_DISPONIBLE:
+            // un dato desconocido debe verse como desconocido.
             setBalances(data.resumen.map(b => ({
               asset: b.symbol === "USDT" ? "USDT" : b.symbol.replace("USDT", ""),
               free: b.cantidad,
               locked: 0,
               price_usdt: b.precio_actual,
               total_usd: b.valor_actual,
-              average_price: b.average_price ?? 0,
-              pnl: b.pnl ?? 0
+              average_price: b.average_price,
+              average_price_status: b.average_price_status,
+              pnl: b.pnl,
+              pnl_status: b.pnl_status
             })));
-            setTotalUSD(data.ganancia_total ?? "0.00");
+            setTotalUSD(data.valor_total_usd);
           } else {
             setBalanceUSDT("Error");
             setTotalUSD("Error");
@@ -111,10 +115,16 @@ function DashboardPage() {
                         {b.total_usd?.toFixed(2) ?? "0.00"}
                       </td>
                       <td className="px-4 py-2 text-indigo-700">
-                        {b.average_price !== undefined ? b.average_price.toFixed(2) : "N/D"}
+                        {b.average_price_status === "DISPONIBLE"
+                          ? b.average_price.toFixed(2)
+                          : <span className="text-gray-400" title="No hay coste base registrado">No disponible</span>}
                       </td>
-                      <td className={`px-4 py-2 font-semibold ${b.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {b.pnl !== undefined ? b.pnl.toFixed(2) : "N/D"}
+                      <td className={`px-4 py-2 font-semibold ${
+                        b.pnl_status !== "DISPONIBLE" ? 'text-gray-400'
+                          : b.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {b.pnl_status === "DISPONIBLE"
+                          ? b.pnl.toFixed(2)
+                          : <span title="No hay coste base para calcular el P&L">No disponible</span>}
                       </td>
                       <td className="px-4 py-2 text-purple-800">N/D</td>
                     </tr>
