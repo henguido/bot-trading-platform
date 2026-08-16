@@ -10,3 +10,19 @@ passlib[bcrypt]
 python-jose[cryptography]
 psycopg2-binary
 email-validator
+
+# Dependencias que el codigo importa DIRECTAMENTE y que hasta ahora solo
+# llegaban por transitividad. Declararlas evita que una reconstruccion futura
+# se rompa si el paquete intermedio deja de arrastrarlas.
+#
+#   pytz      importado por backend/main.py, backend/risk/reloj.py y
+#             backend/utils/time_utils.py. Sostiene el calculo del dia de
+#             riesgo y, por tanto, el kill switch diario.
+#             Llegaba via dateparser <- python-binance.
+#   pydantic  importado por backend/app/schemas.py. Llegaba via fastapi.
+#
+# Sin pin, igual que el resto de este archivo. Versiones con las que se
+# verificaron 286/286 pruebas en Python 3.13.3:
+#   pytz==2026.3.post1   pydantic==2.13.4
+pytz
+pydantic
