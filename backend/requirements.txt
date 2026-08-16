@@ -1,3 +1,12 @@
+# Dependencias del backend.
+#
+# Instalar con:             pip install -r backend/requirements.txt
+# Instalacion REPRODUCIBLE: pip install -r backend/requirements.txt -c constraints.txt
+#
+# constraints.txt (en la raiz) fija el conjunto exacto verificado con 286/286
+# pruebas. Sin el, pip resuelve la version mas reciente de cada paquete y dos
+# reconstrucciones pueden instalar conjuntos distintos.
+
 fastapi
 uvicorn
 sqlalchemy

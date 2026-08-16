@@ -1,5 +1,10 @@
 # Dependencias solo para desarrollo y pruebas.
-# Instalar con:  pip install -r requirements-dev.txt
+# Instalar con:            pip install -r requirements-dev.txt
+# Instalacion REPRODUCIBLE: pip install -r requirements-dev.txt -c constraints.txt
+#
+# constraints.txt fija el conjunto exacto con el que se verificaron 286/286
+# pruebas. Sin el, pip resuelve la version mas reciente de cada paquete y dos
+# reconstrucciones pueden instalar conjuntos distintos.
 #
 # Las pruebas NO deben tocar Binance, Alpaca, OANDA, OpenAI ni produccion.
 pytest>=8.0
