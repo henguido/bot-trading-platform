@@ -130,6 +130,19 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 # a la fase de optimizacion de IA, posterior a main.
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-2024-08-06').strip() or 'gpt-4o-2024-08-06'
 
+# Timeout de red para las llamadas al LLM. Unidad: SEGUNDOS.
+# Antes no habia ninguno: una peticion colgada bloqueaba el hilo de trading
+# indefinidamente, sin ciclo, sin logs y con el kill switch inoperante.
+LLM_TIMEOUT_SEGUNDOS = _leer_int('LLM_TIMEOUT_SEGUNDOS', 60, minimo=1, maximo=600)
+
+# Tarifas para convertir tokens en USD. Unidad: USD por MILLON de tokens.
+# SIN valor por defecto a proposito: las tarifas de los proveedores cambian y
+# hardcodearlas recalcularia el costo historico -y mal- en cada ajuste, sin
+# dejar rastro de que tarifa se aplico. Si no se definen, el costo se registra
+# como NO_DISPONIBLE, nunca como 0.0.
+LLM_PRECIO_INPUT_USD_POR_1M = _leer_float('LLM_PRECIO_INPUT_USD_POR_1M', None, minimo=0.0)
+LLM_PRECIO_OUTPUT_USD_POR_1M = _leer_float('LLM_PRECIO_OUTPUT_USD_POR_1M', None, minimo=0.0)
+
 # Tiempo entre ciclos de analisis. Unidad: SEGUNDOS.
 # Minimo 60 s para no martillear a los proveedores; maximo 7 dias.
 WAIT_TIME = _leer_int('WAIT_TIME', 14400, minimo=60, maximo=604800)

@@ -373,7 +373,8 @@ def trading_loop():
                 sentimiento,
                 noticias_str,
                 portafolio_real,
-                market_pairs_filtrados
+                market_pairs_filtrados,
+                ciclo=ciclo,   # solo telemetria: permite agregar por ciclo
             )
 
             if not resultados:

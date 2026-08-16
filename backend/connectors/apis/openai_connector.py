@@ -1,13 +1,37 @@
 import datetime
 import requests
 import json
+import time
 from backend.config import settings
+from backend.telemetria_llm import MetricasLlamadaLLM, registrar_llamada
+
+def _contar_noticias(noticias):
+    """Cuantos titulares se enviaron. No guarda su contenido."""
+    if noticias is None:
+        return None
+    if isinstance(noticias, (list, tuple, set)):
+        return len(noticias)
+    if isinstance(noticias, str):
+        return len([l for l in noticias.splitlines() if l.strip()])
+    return None
+
 
 class OpenAIConnector:
-    def __init__(self):
+    def __init__(self, registrar_telemetria=None):
         self.api_key = settings.OPENAI_API_KEY
         self.model = settings.OPENAI_MODEL
         self.base_url = "https://api.openai.com/v1/chat/completions"
+        self.timeout_segundos = getattr(settings, "LLM_TIMEOUT_SEGUNDOS", 60)
+        # Inyectable para poder probar la telemetria sin base de datos.
+        self._registrar = registrar_telemetria or registrar_llamada
+
+    def _registrar_telemetria(self, metricas):
+        """Nunca propaga: un fallo de telemetria no altera el trading."""
+        try:
+            self._registrar(metricas)
+        except Exception as e:
+            print(f"[TELEMETRIA] fallo al registrar ({type(e).__name__}). "
+                  f"El comportamiento de trading no cambia.")
 
     def enviar_prompt(self, prompt):
         headers = {
@@ -33,7 +57,7 @@ class OpenAIConnector:
             print("❌ Error al llamar OpenAI:", e)
             return None
 
-    def analyze_multiple_assets(self, activos, capital_usd, market_sentiment, noticias, portafolio_real=None, market_pairs=None):
+    def analyze_multiple_assets(self, activos, capital_usd, market_sentiment, noticias, portafolio_real=None, market_pairs=None, ciclo=None):
         prompt = f"""
 Actúa como un analista financiero profesional especializado en criptomonedas, acciones y divisas.
 
@@ -68,8 +92,12 @@ Basado en el análisis técnico, el sentimiento del mercado y las noticias actua
                 lines.append(linea)
 
         prompt += "\n".join(lines)
-        print("📝 Prompt enviado a GPT:")
-        print(prompt)
+        # Antes se volcaba el prompt COMPLETO por consola en cada ciclo (decenas
+        # de miles de caracteres con la cartera entera). Se sustituye por sus
+        # magnitudes: es lo que hace falta para analizar el gasto, sin
+        # derramar el contenido en los logs.
+        print(f"📝 Prompt a GPT: {len(prompt)} chars, {len(lines)} activos, "
+              f"{len(market_pairs) if market_pairs else 0} pares")
 
         prompt += f"""
 Puedes tomar decisiones de COMPRA sobre cualquiera de los activos listados, incluso si no tienen posición abierta. Tambien puedes VENDER si consideras que es razonable vender el activo con saldo total o parcial
@@ -133,16 +161,43 @@ No asumas que debes operar siempre. Solo decide si hay una señal clara.
             "temperature": 0.3
         }
 
+        # ── Telemetria (Fase BOT 2.0-01) ────────────────────────────────────
+        # Solo MIDE. No cambia el prompt, ni el modelo, ni la decision.
+        metricas = MetricasLlamadaLLM(
+            operacion="analyze_multiple_assets",
+            modelo_solicitado=self.model,
+            prompt_chars=len(prompt),
+            n_activos=len(activos) if activos is not None else None,
+            n_market_pairs=len(market_pairs) if market_pairs else 0,
+            n_noticias=_contar_noticias(noticias),
+            ciclo=ciclo,
+        )
+        inicio = time.perf_counter()
+
+        def _cerrar(exito, *, tipo_error=None, respuesta_chars=None):
+            metricas.exito = exito
+            metricas.tipo_error = tipo_error
+            metricas.respuesta_chars = respuesta_chars
+            metricas.latencia_ms = int((time.perf_counter() - inicio) * 1000)
+            # Nunca propaga: un fallo de telemetria no puede alterar el trading.
+            self._registrar_telemetria(metricas)
+
         try:
-            response = requests.post(self.base_url, headers=headers, json=body)
+            response = requests.post(self.base_url, headers=headers, json=body,
+                                     timeout=self.timeout_segundos)
+            metricas.http_status = getattr(response, "status_code", None)
             data = response.json()
+            metricas.aplicar_usage(data)
 
             if "choices" not in data:
-                print("⚠️ No se encontró 'choices' en la respuesta de OpenAI.")
-                print("📥 Respuesta completa de OpenAI:", data)
+                # No se vuelca `data` completo: puede contener eco del prompt.
+                print("⚠️ No se encontró 'choices' en la respuesta de OpenAI. "
+                      f"status={metricas.http_status} claves={sorted(data) if isinstance(data, dict) else type(data).__name__}")
+                _cerrar(False, tipo_error="respuesta_sin_choices")
                 return [], "Sin respuesta válida"
 
             content = data["choices"][0]["message"]["content"]
+            metricas.respuesta_chars = len(content or "")
 
             try:
                 if "```json" in content:
@@ -159,14 +214,22 @@ No asumas que debes operar siempre. Solo decide si hay una señal clara.
                 json_str = re.sub(r'//.*', '', json_str)    
                 
                 parsed = json.loads(json_str)
+                _cerrar(True, respuesta_chars=len(content or ""))
                 return parsed, content
             except Exception as e:
-                print("⚠️ Error parseando JSON de respuesta GPT:", e)
-                print("📥 Contenido bruto:", content)
+                # La llamada HTTP SI tuvo exito; lo que fallo fue el parseo.
+                # Se distinguen para no confundir un fallo de red con uno de
+                # formato al analizar el gasto.
+                print(f"⚠️ Error parseando JSON de respuesta GPT: {type(e).__name__}: {e}")
+                _cerrar(False, tipo_error="json_invalido",
+                        respuesta_chars=len(content or ""))
                 return [], content  # ⛔ JSON inválido, pero conservamos la explicación
 
         except Exception as e:
-            print("❌ Error llamando a OpenAI:", e)
+            # Se registra la CLASE de la excepcion, no el mensaje completo:
+            # algunos errores de requests incluyen la URL con parametros.
+            print(f"❌ Error llamando a OpenAI: {type(e).__name__}")
+            _cerrar(False, tipo_error=type(e).__name__)
             return [], "Error de conexión"
 
 '''   def analyze_assets_in_chunks(

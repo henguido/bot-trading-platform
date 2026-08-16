@@ -1,5 +1,5 @@
 from sqlalchemy import (Column, Integer, String, Float, ForeignKey, DateTime,
-                        UniqueConstraint)
+                        Boolean, UniqueConstraint)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.app.database import Base
@@ -122,6 +122,48 @@ class Fill(Base):
     registrado_en = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     orden = relationship("Orden", back_populates="fills")
+
+
+class LlmCallAudit(Base):
+    """
+    Metricas de UNA llamada al LLM. Tabla propia y no DecisionAudit porque la
+    cardinalidad no coincide: una llamada analiza N activos y produce N
+    decisiones. Ademas aqui NO se guarda contenido -ni prompt, ni respuesta, ni
+    cabeceras, ni claves-, solo magnitudes.
+    """
+    __tablename__ = "llm_call_audit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    call_id = Column(String(64), unique=True, index=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+
+    proveedor = Column(String(32), nullable=False)
+    operacion = Column(String(64), nullable=False, index=True)
+    modelo_solicitado = Column(String(128))
+    modelo_respuesta = Column(String(128))
+
+    http_status = Column(Integer)
+    exito = Column(Boolean, nullable=False, default=False)
+    tipo_error = Column(String(128))
+    latencia_ms = Column(Integer)
+
+    prompt_chars = Column(Integer)
+    respuesta_chars = Column(Integer)
+    prompt_tokens = Column(Integer)
+    completion_tokens = Column(Integer)
+    total_tokens = Column(Integer)
+
+    n_activos = Column(Integer)
+    n_market_pairs = Column(Integer)
+    n_noticias = Column(Integer)
+    ciclo = Column(Integer, index=True)
+
+    # NULL cuando no hay tarifas configuradas o falta usage. Nunca 0.0 por
+    # desconocimiento. La tarifa aplicada se guarda para que el calculo siga
+    # siendo auditable aunque el proveedor la cambie despues.
+    costo_usd = Column(Float)
+    costo_status = Column(String(24), nullable=False, default="NO_DISPONIBLE")
+    costo_detalle = Column(String(255))
 
 
 class DecisionAudit(Base):

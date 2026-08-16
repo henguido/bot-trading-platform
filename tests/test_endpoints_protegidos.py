@@ -95,14 +95,41 @@ def test_las_pruebas_no_importan_conectores_reales():
     test_coordinador.test_importar_main_no_arranca_ningun_bucle y
     test_main_no_arranca_hilos_a_nivel_de_modulo.
     """
+    # openai_connector NO esta en la lista: su __init__ solo guarda cadenas y
+    # no abre ninguna conexion (lo demuestra
+    # test_el_constructor_de_openai_no_abre_red, mas abajo). Las pruebas de
+    # telemetria necesitan importarlo, y siempre sustituyen requests.post por
+    # un doble. Los otros tres SI construyen clientes de red en __init__.
     prohibidos = ("real_trading_connector", "alpaca_connector",
-                  "oanda_connector", "openai_connector")
+                  "oanda_connector")
     for archivo in Path(RAIZ, "tests").glob("*.py"):
         texto = archivo.read_text(encoding="utf-8")
         for p in prohibidos:
             assert f"import {p}" not in texto and f"from {p}" not in texto, (
                 f"{archivo.name} importa {p}: podria abrir conexiones reales"
             )
+
+
+def test_el_constructor_de_openai_no_abre_red():
+    """
+    Justifica la excepcion de la salvaguarda anterior: construir
+    OpenAIConnector no debe hacer ninguna peticion. Si algun dia deja de ser
+    cierto, esta prueba falla y hay que devolverlo a la lista de prohibidos.
+    """
+    import requests
+
+    llamadas = []
+    originales = {n: getattr(requests, n) for n in ("post", "get", "request")}
+    for n in originales:
+        setattr(requests, n, lambda *a, **k: llamadas.append(1))
+    try:
+        from backend.connectors.apis.openai_connector import OpenAIConnector
+        OpenAIConnector()
+    finally:
+        for n, f in originales.items():
+            setattr(requests, n, f)
+
+    assert llamadas == [], "el constructor de OpenAIConnector no puede hacer red"
 
 
 def test_modo_paper_durante_las_pruebas():
