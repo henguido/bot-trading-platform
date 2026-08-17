@@ -9,10 +9,17 @@ credenciales privadas, no GPT, no RiskEngine y no ejecuta ordenes.
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+# `python scripts/run_edge_falsacion.py` pone scripts/ en sys.path. Anclamos la
+# raiz por __file__ para que el runner funcione igual desde CI u otro CWD.
+RAIZ_PROYECTO = Path(__file__).resolve().parents[1]
+if str(RAIZ_PROYECTO) not in sys.path:
+    sys.path.insert(0, str(RAIZ_PROYECTO))
 
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.economia.experimento_edge import (
@@ -29,7 +36,7 @@ from backend.economia.protocolo_experimento_edge import (
     UNIVERSO_FUENTE,
 )
 
-SALIDA = Path("artifacts/edge-validation-2025.json")
+SALIDA = RAIZ_PROYECTO / "artifacts" / "edge-validation-2025.json"
 
 
 def _jsonable(valor: Any):
