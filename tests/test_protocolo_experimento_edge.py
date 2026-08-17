@@ -9,9 +9,16 @@ from backend.economia.protocolo_experimento_edge import (
     DATASET_HASTA_MS,
     FOLDS_MINIMOS_CON_UPLIFT_POSITIVO,
     FOLDS_VALIDACION_2025,
+    FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA,
     HORIZONTES_HORAS,
+    INTERVALO_HORAS,
+    INTERVALO_KLINE,
+    MESES_CROSS_SECTION_MINIMOS,
+    MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS,
     SURVIVORSHIP_PENDIENTE,
     UNIVERSO_FALSACION,
+    UPLIFT_CROSS_SECTION_MINIMO,
+    VENTANA_ESTADO_HORAS,
     configuraciones_predeclaradas,
 )
 
@@ -20,6 +27,14 @@ def test_universo_falsacion_tiene_20_simbolos_unicos_usdt():
     assert len(UNIVERSO_FALSACION) == 20
     assert len(set(UNIVERSO_FALSACION)) == 20
     assert all(s.endswith("USDT") for s in UNIVERSO_FALSACION)
+
+
+def test_resolucion_4h_cubre_exactamente_horizontes_y_ventana():
+    assert INTERVALO_KLINE == "4h"
+    assert INTERVALO_HORAS == 4
+    assert VENTANA_ESTADO_HORAS == 24
+    assert all(h % INTERVALO_HORAS == 0 for h in HORIZONTES_HORAS)
+    assert VENTANA_ESTADO_HORAS % INTERVALO_HORAS == 0
 
 
 def test_particion_global_es_2022_train_2025_valid_2026_test():
@@ -45,4 +60,8 @@ def test_grilla_predeclarada_tiene_72_configuraciones_unicas():
 def test_criterios_minimos_quedan_fijos_antes_de_resultados():
     assert COBERTURA_MINIMA_VALIDACION == Decimal("0.50")
     assert FOLDS_MINIMOS_CON_UPLIFT_POSITIVO == 3
+    assert UPLIFT_CROSS_SECTION_MINIMO == Decimal("0")
+    assert FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA == Decimal("0.50")
+    assert MESES_CROSS_SECTION_MINIMOS == 12
+    assert MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS == 8
     assert SURVIVORSHIP_PENDIENTE is True
