@@ -16,6 +16,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 
 from backend.economia.dataset_edge import construir_dataset
 from backend.economia.edge_historico import ObservacionEdge
+from backend.economia.evaluacion_celdas import _resumen_cross_section
 from backend.economia.historico_binance import descargar_klines_rango
 from backend.economia.protocolo_experimento_edge import (
     COBERTURA_MINIMA_VALIDACION,
@@ -24,11 +25,15 @@ from backend.economia.protocolo_experimento_edge import (
     DATASET_HASTA_MS,
     FOLDS_MINIMOS_CON_UPLIFT_POSITIVO,
     FOLDS_VALIDACION_2025,
+    FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA,
     INTERVALO_HORAS,
     INTERVALO_KLINE,
+    MESES_CROSS_SECTION_MINIMOS,
+    MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS,
     SURVIVORSHIP_PENDIENTE,
     UNIVERSO_FALSACION,
     UNIVERSO_FUENTE,
+    UPLIFT_CROSS_SECTION_MINIMO,
     VENTANA_ESTADO_HORAS,
     ConfiguracionCeldas,
     configuraciones_predeclaradas,
@@ -67,6 +72,7 @@ class ResultadoConfiguracionFalsacion:
     configuracion: ConfiguracionCeldas
     resultado: ResultadoWalkForwardCeldas
     folds_con_uplift_positivo: int
+    folds_cross_section_positivos: int
     supera_criterios_minimos: bool
     motivos_rechazo: Tuple[str, ...]
 
@@ -106,8 +112,6 @@ def preparar_dataset_falsacion(
                 n_observaciones_4h=0))
             continue
 
-        # construir_dataset sobre UN simbolo limita el pico de memoria. Como la
-        # resolucion ya es 4h no existe una serie horaria intermedia que guardar.
         manifiesto = construir_dataset(
             {symbol: descarga.velas},
             intervalo_horas=INTERVALO_HORAS,
@@ -151,7 +155,13 @@ def _uplift_fold(predicciones) -> Optional[Decimal]:
     return top - baseline if top is not None and baseline is not None else None
 
 
-def _aplicar_criterios(resultado: ResultadoWalkForwardCeldas) -> tuple[bool, Tuple[str, ...], int]:
+def _uplift_cross_section_fold(predicciones) -> Optional[Decimal]:
+    return _resumen_cross_section(tuple(predicciones))["uplift"]
+
+
+def _aplicar_criterios(
+    resultado: ResultadoWalkForwardCeldas,
+) -> tuple[bool, Tuple[str, ...], int, int]:
     motivos = []
     if resultado.cobertura < COBERTURA_MINIMA_VALIDACION:
         motivos.append("COBERTURA_INSUFICIENTE")
@@ -168,7 +178,29 @@ def _aplicar_criterios(resultado: ResultadoWalkForwardCeldas) -> tuple[bool, Tup
     )
     if folds_positivos < FOLDS_MINIMOS_CON_UPLIFT_POSITIVO:
         motivos.append("UPLIFT_INESTABLE_ENTRE_FOLDS")
-    return not motivos, tuple(motivos), folds_positivos
+
+    # Evidencia cross-sectional: seleccion dentro del mismo momento de mercado.
+    if (resultado.uplift_cross_section_medio is None
+            or resultado.uplift_cross_section_medio <= UPLIFT_CROSS_SECTION_MINIMO):
+        motivos.append("SIN_UPLIFT_CROSS_SECTION")
+    if (resultado.fraccion_timestamps_uplift_positivo is None
+            or resultado.fraccion_timestamps_uplift_positivo
+            < FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA):
+        motivos.append("CROSS_SECTION_INESTABLE_TIMESTAMPS")
+    if resultado.n_meses_cross_section < MESES_CROSS_SECTION_MINIMOS:
+        motivos.append("COBERTURA_MENSUAL_CROSS_SECTION_INSUFICIENTE")
+    if resultado.meses_uplift_positivo < MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS:
+        motivos.append("UPLIFT_CROSS_SECTION_INESTABLE_MENSUAL")
+
+    folds_cs_positivos = sum(
+        1 for f in resultado.folds
+        if (_uplift_cross_section_fold(f.predicciones) is not None
+            and _uplift_cross_section_fold(f.predicciones) > 0)
+    )
+    if folds_cs_positivos < FOLDS_MINIMOS_CON_UPLIFT_POSITIVO:
+        motivos.append("UPLIFT_CROSS_SECTION_INESTABLE_FOLDS")
+
+    return not motivos, tuple(motivos), folds_positivos, folds_cs_positivos
 
 
 def evaluar_validacion_predeclarada(
@@ -196,10 +228,11 @@ def evaluar_validacion_predeclarada(
             embargo_horas=c.horizonte_horas,
             fase_horas=c.fase_horas,
         )
-        pasa, motivos, folds_positivos = _aplicar_criterios(r)
+        pasa, motivos, folds_positivos, folds_cs_positivos = _aplicar_criterios(r)
         resultados.append(ResultadoConfiguracionFalsacion(
             configuracion=c, resultado=r,
             folds_con_uplift_positivo=folds_positivos,
+            folds_cross_section_positivos=folds_cs_positivos,
             supera_criterios_minimos=pasa,
             motivos_rechazo=motivos,
         ))
