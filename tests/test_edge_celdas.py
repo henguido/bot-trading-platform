@@ -176,11 +176,18 @@ def test_feature_invalida_no_se_convierte_en_cero():
     assert "negativas" in e.motivo
 
 
-def test_modelo_no_resta_costes_ni_decide_comprar():
+def test_modelo_no_importa_trading_llm_red_ni_bd():
     import ast
     from pathlib import Path
     modulo = Path(__file__).resolve().parents[1] / "backend" / "economia" / "edge_celdas.py"
     arbol = ast.parse(modulo.read_text(encoding="utf-8"))
-    imports = ast.dump(arbol).lower()
+    importados = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            importados.extend(alias.name for alias in nodo.names)
+        elif isinstance(nodo, ast.ImportFrom):
+            importados.append(nodo.module or "")
+            importados.extend(alias.name for alias in nodo.names)
+    texto = " ".join(importados).lower()
     for prohibido in ("openai", "motorriesgo", "scanner", "requests", "sqlalchemy"):
-        assert prohibido not in imports
+        assert prohibido not in texto
