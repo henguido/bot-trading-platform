@@ -17,7 +17,10 @@ from typing import Iterable, Optional, Sequence, Tuple
 from backend.economia.dataset_edge import construir_dataset
 from backend.economia.edge_historico import ObservacionEdge
 from backend.economia.evaluacion_celdas import _resumen_cross_section
-from backend.economia.historico_binance import descargar_klines_rango
+from backend.economia.historico_binance import (
+    descargar_klines_data_api,
+    descargar_klines_rango,
+)
 from backend.economia.protocolo_experimento_edge import (
     COBERTURA_MINIMA_VALIDACION,
     CORTE_TEST_MS,
@@ -46,6 +49,8 @@ class ResumenDescargaSimbolo:
     symbol: str
     completa: bool
     error: Optional[str]
+    fuente: str
+    error_fuente_primaria: Optional[str]
     n_requests: int
     n_velas: int
     inicio_open_ms: Optional[int]
@@ -69,7 +74,7 @@ class DatasetFalsacion:
 
     @property
     def n_symbols_completos(self) -> int:
-        """Compatibilidad: respuestas HTTP completas, aunque no tengan historia util."""
+        """Compatibilidad: respuestas completas, aunque no tengan historia util."""
         return sum(d.completa for d in self.descargas)
 
     @property
@@ -106,19 +111,28 @@ def preparar_dataset_falsacion(
     start_ms: int = DATASET_DESDE_MS,
     end_ms: int = DATASET_HASTA_MS,
 ) -> DatasetFalsacion:
-    """Descarga/procesa cada symbol por separado y conserva solo observaciones 4h."""
+    """Descarga cada symbol: API principal y fallback market-data-only publico."""
     observaciones = []
     resumenes = []
 
     for symbol in tuple(symbols):
-        descarga = descargar_klines_rango(
+        primaria = descargar_klines_rango(
             binance, symbol, interval=INTERVALO_KLINE,
             start_ms=start_ms, end_ms=end_ms, limit=1000)
+        descarga = primaria
+        error_primaria = None
+        if not primaria.completa:
+            error_primaria = primaria.error
+            descarga = descargar_klines_data_api(
+                symbol, interval=INTERVALO_KLINE,
+                start_ms=start_ms, end_ms=end_ms, limit=1000)
+
         if not descarga.completa:
             resumenes.append(ResumenDescargaSimbolo(
                 symbol=symbol, completa=False, error=descarga.error,
-                n_requests=descarga.n_requests, n_velas=0,
-                inicio_open_ms=None, fin_open_ms=None,
+                fuente=descarga.fuente, error_fuente_primaria=error_primaria,
+                n_requests=primaria.n_requests + descarga.n_requests,
+                n_velas=0, inicio_open_ms=None, fin_open_ms=None,
                 n_gaps=0, horas_faltantes_estimadas=0,
                 n_observaciones_4h=0))
             continue
@@ -133,7 +147,9 @@ def preparar_dataset_falsacion(
         observaciones.extend(manifiesto.observaciones)
         resumenes.append(ResumenDescargaSimbolo(
             symbol=symbol, completa=True, error=None,
-            n_requests=descarga.n_requests, n_velas=cobertura.n_velas,
+            fuente=descarga.fuente, error_fuente_primaria=error_primaria,
+            n_requests=primaria.n_requests + descarga.n_requests,
+            n_velas=cobertura.n_velas,
             inicio_open_ms=cobertura.inicio_open_ms,
             fin_open_ms=cobertura.fin_open_ms,
             n_gaps=cobertura.n_gaps,
