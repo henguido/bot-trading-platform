@@ -38,6 +38,10 @@ UNIVERSO_FALSACION: Tuple[str, ...] = (
     "AVAXUSDT", "UNIUSDT", "AAVEUSDT", "FILUSDT", "NEARUSDT",
 )
 
+# Si la fuente publica no entrega al menos el 75% del universo predeclarado,
+# la ejecucion se clasifica como DATASET_INSUFICIENTE; nunca como modelo falsado.
+MIN_SYMBOLS_DATASET_FALSACION = 15
+
 INTERVALO_KLINE = "4h"
 INTERVALO_HORAS = 4
 VENTANA_ESTADO_HORAS = 24
