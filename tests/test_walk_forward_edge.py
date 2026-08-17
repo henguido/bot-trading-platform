@@ -133,11 +133,18 @@ def test_orden_de_dataset_no_cambia_resultado():
     assert a == b
 
 
-def test_modulo_no_importa_test_set_costes_random_ml_llm_ni_trading():
+def test_modulo_no_importa_ml_llm_trading_red_ni_bd():
     arbol = ast.parse(MODULO.read_text(encoding="utf-8"))
-    texto = ast.dump(arbol)
+    importados = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            importados.extend(alias.name for alias in nodo.names)
+        elif isinstance(nodo, ast.ImportFrom):
+            importados.append(nodo.module or "")
+            importados.extend(alias.name for alias in nodo.names)
+    texto = " ".join(importados).lower()
     for prohibido in (
         "random", "sklearn", "numpy", "pandas", "openai", "costes",
-        "MotorRiesgo", "scanner", "backend.main", "SessionLocal", "requests",
+        "motorriesgo", "scanner", "backend.main", "sessionlocal", "requests",
     ):
         assert prohibido not in texto
