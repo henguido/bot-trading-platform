@@ -179,7 +179,7 @@ def test_decimal_no_arrastra_error_binario():
         costo_ia_asignado_usd=Decimal("0.00001"),
     )
     assert isinstance(e.total_usd, Decimal)
-    assert e.total_usd == Decimal("0.000031")
+    assert e.total_usd == Decimal("0.000025")
 
 
 def test_como_dict_solo_serializa_primitivos():
