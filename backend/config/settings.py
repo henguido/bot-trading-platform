@@ -7,9 +7,17 @@ variables de entorno del proyecto. Cualquier otro modulo importa de aqui.
 from dotenv import load_dotenv
 import math
 import os
+from pathlib import Path
 from urllib.parse import urlsplit
 
-load_dotenv()
+# El .env local es SIEMPRE el de la raiz del repositorio, independientemente
+# del CWD o de si el proceso arranca con python, uvicorn, un IDE o un servicio.
+# `override=False` conserva la precedencia correcta: las variables reales del
+# entorno ganan sobre el fichero local. Si el archivo no existe (despliegue),
+# python-dotenv simplemente no carga nada y settings usa el entorno/defaults.
+RAIZ_PROYECTO = Path(__file__).resolve().parents[2]
+ENV_LOCAL_CANONICO = RAIZ_PROYECTO / ".env"
+load_dotenv(dotenv_path=ENV_LOCAL_CANONICO, override=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
