@@ -74,6 +74,13 @@ FASE_REJILLA_HORAS = 0
 COBERTURA_MINIMA_VALIDACION = Decimal("0.50")
 FOLDS_MINIMOS_CON_UPLIFT_POSITIVO = 3  # de 4 trimestres
 
+# Estabilidad cross-sectional. No basta que el modelo diga "todo el mercado
+# subira": debe ordenar mejor activos que coexistian en el MISMO timestamp.
+UPLIFT_CROSS_SECTION_MINIMO = Decimal("0")       # se exige estrictamente > 0
+FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA = Decimal("0.50")
+MESES_CROSS_SECTION_MINIMOS = 12
+MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS = 8  # 2/3 del ano de validacion
+
 SURVIVORSHIP_PENDIENTE = True
 UNIVERSO_FUENTE = "lista_fija_falsacion_actual_versionada_antes_de_resultados"
 
