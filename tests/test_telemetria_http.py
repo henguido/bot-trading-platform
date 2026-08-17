@@ -648,10 +648,14 @@ def test_n_elementos_de_exchange_info_y_account_balance(monkeypatch):
     saldos = [{"asset": "USDT", "free": "20.0", "locked": "0.0"}]
 
     monkeypatch.setattr(ac.binance, "init_client", lambda: None)
+    # 04A-1 dejo de delegar en `get_account_balance()` y llama directamente a
+    # `client.get_account()`, para reutilizar EL MISMO payload y sacar de el la
+    # fee taker sin anadir una peticion. El doble se ajusta a esa ruta; el
+    # trafico y lo que se mide siguen siendo los mismos.
     monkeypatch.setattr(ac.binance, "client",
-                        SimpleNamespace(get_exchange_info=lambda: {"symbols": simbolos}),
+                        SimpleNamespace(get_exchange_info=lambda: {"symbols": simbolos},
+                                        get_account=lambda: {"balances": saldos}),
                         raising=False)
-    monkeypatch.setattr(ac.binance, "get_account_balance", lambda: saldos)
 
     m = MedidorCicloHttp()
     activos, balances, info = ac.get_available_assets(medidor=m)
