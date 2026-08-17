@@ -179,11 +179,18 @@ def test_hiperparametros_invalidos_fallan_cerrado(h, k):
         ajustar_modelo(train_dos_clusters(), horizonte_horas=h, k=k)
 
 
-def test_modulo_no_importa_cost_model_scanner_llm_ml_red_ni_bd():
+def test_modulo_no_importa_cost_model_llm_ml_red_ni_bd():
     arbol = ast.parse(MODULO.read_text(encoding="utf-8"))
-    texto = ast.dump(arbol)
+    importados = []
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.Import):
+            importados.extend(alias.name for alias in nodo.names)
+        elif isinstance(nodo, ast.ImportFrom):
+            importados.append(nodo.module or "")
+            importados.extend(alias.name for alias in nodo.names)
+    texto = " ".join(importados).lower()
     for prohibido in (
         "costes", "openai", "sklearn", "numpy", "pandas",
-        "requests", "sqlalchemy", "binance", "MotorRiesgo", "SessionLocal",
+        "requests", "sqlalchemy", "binance", "motorriesgo", "sessionlocal",
     ):
         assert prohibido not in texto
