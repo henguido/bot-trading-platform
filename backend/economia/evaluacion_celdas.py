@@ -8,6 +8,11 @@ Ademas mide ranking CROSS-SECTIONAL por timestamp. Un Top25 global puede parecer
 bueno solo porque el modelo asigna edge alto durante un regimen alcista; el bot,
 en cambio, compara activos que existen al mismo tiempo. Por eso tambien medimos
 si dentro de cada timestamp los activos con mayor edge realizan mejor retorno.
+
+PERFORMANCE: dentro de un modelo, el edge depende de la CELDA cuantizada y de
+su vecindario, no del valor continuo exacto dentro de ella. Por eso cada celda
+se evalua una sola vez por holdout y se reutiliza para todas sus observaciones.
+No cambia ninguna prediccion ni criterio; solo evita scans repetidos.
 """
 from __future__ import annotations
 
@@ -18,7 +23,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Tuple
 
-from backend.economia.edge_celdas import ModeloEdgeCeldas, estimar_edge_celdas
+from backend.economia.edge_celdas import (
+    ModeloEdgeCeldas,
+    _clave,
+    _fuera_rango,
+    estimar_edge_celdas,
+)
+from backend.economia.edge_empirico import _vector_crudo
 from backend.economia.edge_historico import ObservacionEdge
 
 DISPONIBLE = "DISPONIBLE"
@@ -179,8 +190,21 @@ def evaluar_holdout_celdas(
         o.etiqueta(modelo.horizonte_horas).retorno_cierre for o in objetivo)
 
     predicciones = []
+    cache_por_celda = {}
     for o in objetivo:
-        e = estimar_edge_celdas(modelo, o.estado)
+        # Mismo fail-closed temporal del estimador, antes de cachear por celda.
+        if o.estado.timestamp_ms <= modelo.max_timestamp_train:
+            continue
+        try:
+            vector = _vector_crudo(o.estado)
+        except ValueError:
+            continue
+        if _fuera_rango(vector, modelo.discretizaciones) is not None:
+            continue
+        clave = _clave(vector, modelo.discretizaciones)
+        if clave not in cache_por_celda:
+            cache_por_celda[clave] = estimar_edge_celdas(modelo, o.estado)
+        e = cache_por_celda[clave]
         if not e.disponible or e.retorno_esperado is None:
             continue
         predicciones.append(PrediccionCeldas(
