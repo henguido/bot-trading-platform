@@ -35,6 +35,27 @@ def nuevo_call_id() -> str:
     return f"llm-{uuid.uuid4().hex}"
 
 
+def _texto(valor, limite):
+    """Normaliza a texto acotado. None si no hay valor: desconocido no es ''."""
+    if valor is None:
+        return None
+    try:
+        s = str(valor).strip()
+    except Exception:
+        return None
+    return s[:limite] if s else None
+
+
+def _entero(valor):
+    """Entero o None. Un valor que no se entiende es desconocido, no cero."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    try:
+        return int(str(valor).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class MetricasLlamadaLLM:
     """Todo lo que se mide de una llamada. Sin contenido, solo magnitudes."""
@@ -63,6 +84,71 @@ class MetricasLlamadaLLM:
     n_market_pairs: Optional[int] = None
     n_noticias: Optional[int] = None
     ciclo: Optional[int] = None          # permite agregar por ciclo
+
+    # ── Fase BOT 2.0-02A ────────────────────────────────────────────────────
+    # Identidad TELEMETRICA de la iteracion del bucle. Permite cruzar esta
+    # llamada con el trafico HTTP del MISMO recorrido (`ciclo_http_audit`).
+    # `ciclo` no sirve para eso: se incrementa en cinco ramas distintas.
+    ciclo_id: Optional[str] = None
+
+    x_request_id: Optional[str] = None
+    # error.type / error.code del cuerpo. 🔒 error.message JAMAS: cita el prompt.
+    error_type: Optional[str] = None
+    error_code: Optional[str] = None
+
+    rl_limit_requests: Optional[int] = None
+    rl_limit_tokens: Optional[int] = None
+    rl_remaining_requests: Optional[int] = None
+    rl_remaining_tokens: Optional[int] = None
+    rl_reset_requests: Optional[str] = None
+    rl_reset_tokens: Optional[str] = None
+
+    def aplicar_cabeceras(self, response) -> None:
+        """
+        Captura x-request-id y las cabeceras x-ratelimit-*.
+
+        Sin ellas un 429 no dice si el limite agotado es de peticiones o de
+        tokens, ni cuando se recupera. NO se copia ninguna otra cabecera: nada
+        de Authorization ni de cookies.
+
+        Nunca lanza: la telemetria no puede alterar el trading.
+        """
+        try:
+            cabeceras = getattr(response, "headers", None)
+            if cabeceras is None:
+                return
+            leer = getattr(cabeceras, "get", None)
+            if not callable(leer):
+                return
+
+            self.x_request_id = _texto(leer("x-request-id"), 64)
+            self.rl_limit_requests = _entero(leer("x-ratelimit-limit-requests"))
+            self.rl_limit_tokens = _entero(leer("x-ratelimit-limit-tokens"))
+            self.rl_remaining_requests = _entero(leer("x-ratelimit-remaining-requests"))
+            self.rl_remaining_tokens = _entero(leer("x-ratelimit-remaining-tokens"))
+            # Llegan como duracion ("6ms", "1m0s"): literales, sin interpretar.
+            self.rl_reset_requests = _texto(leer("x-ratelimit-reset-requests"), 32)
+            self.rl_reset_tokens = _texto(leer("x-ratelimit-reset-tokens"), 32)
+        except Exception:
+            pass
+
+    def aplicar_error(self, data) -> None:
+        """
+        Extrae SOLO `error.type` y `error.code` del cuerpo de la respuesta.
+
+        🔒 `error.message` no se toca: el proveedor puede citar el prompt
+        dentro, y persistirlo abriria exactamente la fuga que 02-01 cerro.
+        """
+        try:
+            if not isinstance(data, dict):
+                return
+            error = data.get("error")
+            if not isinstance(error, dict):
+                return
+            self.error_type = _texto(error.get("type"), 64)
+            self.error_code = _texto(error.get("code"), 64)
+        except Exception:
+            pass
 
     def aplicar_usage(self, data) -> None:
         """
@@ -159,6 +245,16 @@ def registrar_llamada(metricas: MetricasLlamadaLLM, *, session_factory=None,
             n_activos=metricas.n_activos, n_market_pairs=metricas.n_market_pairs,
             n_noticias=metricas.n_noticias, ciclo=metricas.ciclo,
             costo_usd=costo, costo_status=estado_costo, costo_detalle=detalle,
+            # Fase 02A. Ninguna de estas columnas guarda contenido.
+            ciclo_id=metricas.ciclo_id,
+            x_request_id=metricas.x_request_id,
+            error_type=metricas.error_type, error_code=metricas.error_code,
+            rl_limit_requests=metricas.rl_limit_requests,
+            rl_limit_tokens=metricas.rl_limit_tokens,
+            rl_remaining_requests=metricas.rl_remaining_requests,
+            rl_remaining_tokens=metricas.rl_remaining_tokens,
+            rl_reset_requests=metricas.rl_reset_requests,
+            rl_reset_tokens=metricas.rl_reset_tokens,
         )
         with session_factory() as db:
             db.add(fila)

@@ -57,7 +57,7 @@ class OpenAIConnector:
             print("❌ Error al llamar OpenAI:", e)
             return None
 
-    def analyze_multiple_assets(self, activos, capital_usd, market_sentiment, noticias, portafolio_real=None, market_pairs=None, ciclo=None):
+    def analyze_multiple_assets(self, activos, capital_usd, market_sentiment, noticias, portafolio_real=None, market_pairs=None, ciclo=None, ciclo_id=None):
         prompt = f"""
 Actúa como un analista financiero profesional especializado en criptomonedas, acciones y divisas.
 
@@ -171,6 +171,9 @@ No asumas que debes operar siempre. Solo decide si hay una señal clara.
             n_market_pairs=len(market_pairs) if market_pairs else 0,
             n_noticias=_contar_noticias(noticias),
             ciclo=ciclo,
+            # Fase 02A: correlaciona esta llamada con el trafico HTTP del MISMO
+            # recorrido del bucle. Solo telemetria.
+            ciclo_id=ciclo_id,
         )
         inicio = time.perf_counter()
 
@@ -186,8 +189,13 @@ No asumas que debes operar siempre. Solo decide si hay una señal clara.
             response = requests.post(self.base_url, headers=headers, json=body,
                                      timeout=self.timeout_segundos)
             metricas.http_status = getattr(response, "status_code", None)
+            # Fase 02A: x-request-id y x-ratelimit-*. Sin ellas, un 429 no dice
+            # si el limite agotado es de peticiones o de tokens.
+            metricas.aplicar_cabeceras(response)
             data = response.json()
             metricas.aplicar_usage(data)
+            # Solo error.type / error.code. error.message JAMAS: cita el prompt.
+            metricas.aplicar_error(data)
 
             if "choices" not in data:
                 # No se vuelca `data` completo: puede contener eco del prompt.

@@ -165,6 +165,102 @@ class LlmCallAudit(Base):
     costo_status = Column(String(24), nullable=False, default="NO_DISPONIBLE")
     costo_detalle = Column(String(255))
 
+    # ── Fase BOT 2.0-02A · correlacion y diagnostico ─────────────────────────
+    # Todas nullable: las filas escritas por 02-01 no las tienen y siguen
+    # siendo validas.
+    #
+    # Permite cruzar el gasto del LLM con el trafico HTTP del MISMO recorrido
+    # del bucle. `ciclo` (entero) no sirve para eso: se incrementa en cinco
+    # ramas distintas y un recorrido puede incrementarlo varias veces o
+    # ninguna.
+    ciclo_id = Column(String(64), index=True)
+
+    # Identificador que devuelve el proveedor. Es lo que hay que citar en una
+    # reclamacion de soporte, y no revela nada del contenido.
+    x_request_id = Column(String(64))
+
+    # `error.type` / `error.code` del cuerpo de la respuesta. Distinguen un
+    # 429 por cuota agotada de uno por exceso de ritmo, cosa que el codigo HTTP
+    # por si solo no permite.
+    #
+    # 🔒 `error.message` NO se guarda NUNCA: puede citar el prompt.
+    error_type = Column(String(64))
+    error_code = Column(String(64))
+
+    # Cabeceras x-ratelimit-*. Sin ellas, un 429 no dice si el limite es de
+    # peticiones o de tokens, ni cuando se recupera.
+    # Los limites y restantes son enteros documentados; se parsean de forma
+    # defensiva y quedan a NULL si no lo son (desconocido no es cero).
+    # Los `reset` llegan como duracion ("6ms", "1m0s"): se guardan literales
+    # para no perder informacion al interpretarlos.
+    rl_limit_requests = Column(Integer)
+    rl_limit_tokens = Column(Integer)
+    rl_remaining_requests = Column(Integer)
+    rl_remaining_tokens = Column(Integer)
+    rl_reset_requests = Column(String(32))
+    rl_reset_tokens = Column(String(32))
+
+
+class CicloHttpAudit(Base):
+    """
+    Trafico HTTP de UN ciclo, agregado por (ciclo_id, proveedor, operacion).
+
+    Por que agregado y no por peticion: a ~1.895 peticiones por ciclo serian
+    ~4,1 M de filas al ano frente a ~15 k agregadas, para responder exactamente
+    a las mismas preguntas.
+
+    Por que tabla propia y no `llm_call_audit`: aquella mide UNA llamada al
+    LLM; esta mide N peticiones de mercado que ni siquiera tienen por que
+    terminar en una llamada al LLM.
+
+    NO se guarda ninguna URL, cabecera, cuerpo ni credencial: solo contadores,
+    tiempos y codigos de estado.
+    """
+    __tablename__ = "ciclo_http_audit"
+
+    # La cardinalidad del contrato -una fila por (ciclo_id, proveedor,
+    # operacion)- la impone la BASE DE DATOS, no la agregacion en memoria. Si
+    # un medidor se volcara dos veces, o dos procesos midieran el mismo ciclo,
+    # el segundo INSERT se rechaza en vez de duplicar metricas. Portable:
+    # SQLite y PostgreSQL soportan UNIQUE multicolumna sin extensiones.
+    __table_args__ = (
+        UniqueConstraint("ciclo_id", "proveedor", "operacion",
+                         name="uq_ciclo_http_audit_ciclo_proveedor_operacion"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Identidad TELEMETRICA de la iteracion. No participa en ninguna decision.
+    ciclo_id = Column(String(64), nullable=False, index=True)
+    # Contador legacy, solo diagnostico. No es una identidad fiable.
+    ciclo_num = Column(Integer)
+
+    proveedor = Column(String(32), nullable=False)
+    operacion = Column(String(64), nullable=False, index=True)
+
+    n_requests = Column(Integer, nullable=False, default=0)
+    n_ok = Column(Integer, nullable=False, default=0)
+    n_error = Column(Integer, nullable=False, default=0)
+
+    latencia_total_ms = Column(Integer)
+    latencia_max_ms = Column(Integer)
+    # `latencia_media_ms` NO se persiste: es derivable de las dos anteriores y
+    # duplicar estado invita a inconsistencias.
+
+    # Tiempo de PARED de la operacion. Puede diferir de la suma de latencias:
+    # esta ignora el trabajo local entre peticiones.
+    duracion_ms = Column(Integer)
+
+    # Significado dependiente de la operacion; ver telemetria_http.
+    n_elementos = Column(Integer)
+
+    # JSON serializado, p.ej. {"200": 488, "429": 2}. Text y no JSONB para que
+    # el mismo esquema valga en SQLite y en PostgreSQL sin extensiones.
+    status_counts = Column(Text)
+
+    inicio = Column(DateTime)
+    fin = Column(DateTime)
+
 
 class DecisionAudit(Base):
     __tablename__ = "decision_audit"

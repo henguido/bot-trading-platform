@@ -34,7 +34,9 @@ from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
 from backend.reconciliacion import reconciliar_pendientes
+from backend.telemetria_http import MedidorCicloHttp, nuevo_ciclo_id
 from contextlib import asynccontextmanager
+import sys
 import time
 import pytz, traceback
 
@@ -161,6 +163,72 @@ def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
         print(f"⚠️ No se pudo auditar el rechazo de riesgo: {type(e).__name__}: {e}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ROBUSTEZ · INFORMAR DE UN ERROR NO PUEDE MATAR EL BUCLE
+#
+# Hallazgo de la validacion funcional de BOT 2.0-02A. El manejador de errores
+# del ciclo hacia directamente:
+#
+#     print(f"❌ Error inesperado en ciclo de trading: ...")
+#     traceback.print_exc()
+#
+# Con un stdout que no sabe codificar el emoji -cp1252, que es lo que se
+# obtiene en cuanto la salida se redirige a un fichero o a un pipe- el propio
+# print lanzaba UnicodeEncodeError DENTRO del except y mataba el hilo de
+# trading. Observado: el bot murio en el primer error en lugar de esperar y
+# reintentar.
+#
+# No cambia NADA de lo que se informa, ni el scheduling, ni las decisiones.
+# Solo garantiza que informar no pueda ser lo que tumbe el bot.
+# ─────────────────────────────────────────────────────────────────────────────
+def imprimir_resistente(texto, destino=None):
+    """
+    Imprime `texto` sin que un stdout limitado pueda hacer fallar al llamador.
+
+    Si la codificacion del destino no admite algun caracter, se reintenta en
+    ASCII con escapes: `backslashreplace` conserva el caracter perdido de forma
+    legible (\\u274c) en lugar de borrarlo. Si tampoco se puede, no se imprime.
+    Devuelve si se logro imprimir; nadie deberia necesitar comprobarlo.
+    """
+    try:
+        print(texto, file=destino)
+        return True
+    except Exception:
+        pass
+    try:
+        print(str(texto).encode("ascii", "backslashreplace").decode("ascii"),
+              file=destino)
+        return True
+    except Exception:
+        return False
+
+
+def reportar_error_de_ciclo(e, *, destino_rastro=None):
+    """
+    Deja constancia de una excepcion del ciclo SIN poder matar el bucle.
+
+    Informa lo mismo que antes -clase, mensaje y traceback completo- por un
+    camino que no puede lanzar. `traceback.print_exc()` se sustituye por
+    `format_exception` + impresion resistente porque escribe en el stream por
+    su cuenta y falla por el mismo motivo que el print.
+
+    La excepcion original NO se oculta: si su `__str__` es el que falla, al
+    menos se informa de su TIPO.
+    """
+    try:
+        detalle = f"{type(e).__name__}: {e}"
+    except Exception:
+        detalle = type(e).__name__
+    imprimir_resistente(f"❌ Error inesperado en ciclo de trading: {detalle}")
+
+    try:
+        rastro = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+    except Exception:
+        rastro = f"(no se pudo formatear el traceback de {type(e).__name__})"
+    # El traceback iba a stderr con print_exc(); se conserva ese destino.
+    imprimir_resistente(rastro, destino_rastro or sys.stderr)
+
+
 def get_min_notional(symbol, filters_dict):
     symbol_filters = filters_dict.get(symbol)
     if not symbol_filters:
@@ -182,6 +250,14 @@ def trading_loop():
     filters_dict = None
 
     while True:
+        # ── Telemetria HTTP del ciclo (Fase BOT 2.0-02A) ─────────────────────
+        # `ciclo_id` es EXCLUSIVAMENTE TELEMETRICO: no sustituye a `ciclo` ni
+        # participa en EVALUAR_CADA_N_CICLOS, las decisiones, el riesgo, las
+        # ordenes ni el scheduling. Existe porque `ciclo` se incrementa en
+        # cinco ramas distintas -varias dentro de un `continue`- y por tanto no
+        # identifica un recorrido. `ciclo` se guarda como `ciclo_num`, solo
+        # como dato diagnostico legacy.
+        medidor = MedidorCicloHttp(nuevo_ciclo_id(), ciclo_num=ciclo)
         try:
             # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────
             contexto = cargar_contexto_usuario()
@@ -203,7 +279,14 @@ def trading_loop():
 
             if filters_dict is None:
                 binance.init_client()
-                exchange_info = binance.client.get_exchange_info()
+                # Solo el PRIMER ciclo pide exchange_info aqui; despues
+                # filters_dict vive en memoria. get_available_assets(), en
+                # cambio, lo vuelve a pedir en CADA ciclo. Eliminar esa segunda
+                # peticion es trabajo de 02B, no de 02A.
+                op_info = medidor.operacion("binance", "exchange_info")
+                with op_info.peticion(observador=binance.observador_http()):
+                    exchange_info = binance.client.get_exchange_info()
+                op_info.elementos(len(exchange_info.get("symbols", [])))
                 filters_dict = {s["symbol"]: s["filters"] for s in exchange_info["symbols"]}
 
             ahora = datetime.now()
@@ -215,7 +298,7 @@ def trading_loop():
 
             # Cachear noticias por 1 hora para evitar exceso de llamadas
             if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
-                noticias = news_connector.obtener_noticias_combinadas(6)
+                noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
                 noticias_cache = noticias if noticias else []
                 timestamp_cache = ahora
             else:
@@ -227,7 +310,8 @@ def trading_loop():
             print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             try:
-                assets_disponibles, balances_reales, symbols_info = get_available_assets()
+                assets_disponibles, balances_reales, symbols_info = get_available_assets(
+                    medidor=medidor)
             except Exception as e:
                 print(f"❌ Error al inicializar Binance o traer datos: {e}")
                 time.sleep(settings.WAIT_TIME)
@@ -287,7 +371,9 @@ def trading_loop():
 
             activos_para_gpt = []
             symbols_a_precio = [a["symbol"] for a in activos_evaluar if a["type"] == "crypto"]
-            precios_actuales = binance.get_multiple_prices(symbols_a_precio)
+            precios_actuales = binance.get_multiple_prices(
+                symbols_a_precio,
+                medicion=medidor.operacion("binance", "get_multiple_prices"))
 
             for asset in activos_evaluar:
                 symbol = asset["symbol"]
@@ -348,7 +434,7 @@ def trading_loop():
                 if float(b["free"]) + float(b["locked"]) > 0
             ]
 
-            market_pairs = get_market_pairs(symbols_info)
+            market_pairs = get_market_pairs(symbols_info, medidor=medidor)
             usdt_disponible = next((b["cantidad"] for b in portafolio_real if b["moneda"] == "USDT"), 0.0)
 
             # Enviar a análisis
@@ -367,6 +453,12 @@ def trading_loop():
             for a in activos_para_gpt:
                 a.pop("_balance_detected", None)
                 a.pop("_position_detected", None)
+
+            # Sella el tiempo de PARED consumido ANTES de gastar un solo token.
+            # Es la metrica que explica los ~8 m 10 s del baseline frente a los
+            # 1296 ms que costo la llamada al LLM.
+            medidor.marcar_fase_pre_llm(len(activos_para_gpt))
+
             resultados, explicacion_gpt = openai.analyze_multiple_assets(
                 activos_para_gpt,
                 usdt_disponible,
@@ -375,6 +467,7 @@ def trading_loop():
                 portafolio_real,
                 market_pairs_filtrados,
                 ciclo=ciclo,   # solo telemetria: permite agregar por ciclo
+                ciclo_id=medidor.ciclo_id,   # solo telemetria: correlacion HTTP
             )
 
             if not resultados:
@@ -492,11 +585,23 @@ def trading_loop():
 
 
         except Exception as e:
-            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses.
-            print(f"❌ Error inesperado en ciclo de trading: {type(e).__name__}: {e}")
-            traceback.print_exc()
+            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses: se
+            # sigue informando de la clase, el mensaje y el traceback completo.
+            # Lo unico que cambia es que informar ya no puede lanzar y matar el
+            # hilo antes de llegar a la espera (ver reportar_error_de_ciclo).
+            reportar_error_de_ciclo(e)
             time.sleep(settings.WAIT_TIME)
             ciclo += 1
+        finally:
+            # El bucle sale de la iteracion por muchas rutas distintas (varios
+            # `continue` y el manejador de excepciones). El `finally` es lo
+            # unico que garantiza que se mida TAMBIEN el ciclo que aborto
+            # pronto, que es precisamente el caso que interesa diagnosticar.
+            #
+            # `volcar` nunca lanza y nada depende de su retorno: si la
+            # persistencia falla, este ciclo termina exactamente igual que sin
+            # telemetria.
+            medidor.volcar()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
