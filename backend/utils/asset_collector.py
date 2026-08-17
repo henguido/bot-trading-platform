@@ -1,7 +1,8 @@
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.economia.fuentes import extraer_taker_bps
 from backend.simulation.simulator import Simulator
-from backend.telemetria_http import MEDIDOR_NULO, anotar_elementos
+from backend.telemetria_http import (MEDIDOR_NULO, anotar_elementos,
+                                     describir_error)
 
 # Instancias compartidas
 binance = BinanceConnector()
@@ -33,9 +34,7 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
         symbols_info = exchange_info.get("symbols", [])
         anotar_elementos(op_info, len(symbols_info))
     except Exception as e:
-        print(f"❌ Error al inicializar Binance o traer exchange info: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Error al inicializar Binance o traer exchange info: {describir_error(e)}")
         if incluir_costes_cuenta:
             return [], [], [], {"fee_taker_bps_por_lado": None,
                                 "fuente_fee": "NO_DISPONIBLE"}
@@ -65,7 +64,9 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
         # un fallo privado NO borra el universo público. Sólo deja balances y
         # fee como desconocidos. En PAPER esto permite seguir analizando sin
         # depender de que el endpoint de cuenta esté disponible.
-        print(f"❌ Error obteniendo el balance: {e}")
+        # Se sanea porque una excepción de endpoint firmado puede incluir URL,
+        # timestamp o signature en su representación.
+        print(f"❌ Error obteniendo el balance: {describir_error(e)}")
         account_info = None
         balances = []
     anotar_elementos(op_saldos, len(balances))
@@ -132,7 +133,7 @@ def get_market_pairs(symbols_info=None, snapshot=None, medidor=None):
             snapshot = binance.get_price_snapshot(
                 medicion=m.operacion("binance", "market_price_snapshot"))
     except Exception as e:
-        print(f"❌ Error al obtener exchange info de Binance: {e}")
+        print(f"❌ Error al obtener exchange info de Binance: {describir_error(e)}")
         return []
 
     pairs = []
