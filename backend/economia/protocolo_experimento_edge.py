@@ -85,6 +85,15 @@ FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA = Decimal("0.50")
 MESES_CROSS_SECTION_MINIMOS = 12
 MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS = 8  # 2/3 del ano de validacion
 
+# Robustez frente a multiples comparaciones. Una configuracion individual NO
+# habilita TEST aunque pase todos los criterios anteriores. Para ser ROBUSTA
+# debe tener, con el mismo horizonte, vecinos ADYACENTES que tambien pasen en
+# al menos dos dimensiones distintas de {n_bins, min_muestras, max_radio}.
+# "Adyacente" = siguiente/anterior valor dentro de la grilla predeclarada y
+# exactamente una dimension modificada. Exige asi un grupo minimo de 3 configs
+# y evita perseguir un pico aislado de los 72 intentos.
+MIN_DIMENSIONES_VECINAS_ROBUSTAS = 2
+
 SURVIVORSHIP_PENDIENTE = True
 UNIVERSO_FUENTE = "lista_fija_falsacion_actual_versionada_antes_de_resultados"
 
