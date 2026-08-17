@@ -8,6 +8,7 @@ referencia pero no escala a millones de observaciones. Este modelo:
   * una consulta fuera del rango observado en train es OOD y falla cerrado;
   * busca primero la celda exacta y luego radios Manhattan crecientes;
   * exige soporte explicito en muestras, simbolos y timestamps;
+  * audita concentracion: ninguna cifra de soporte se interpreta a ciegas;
   * devuelve distribucion de retorno BRUTO, sin costes ni decisiones de trading.
 
 No hace red, no importa scanner/LLM/RiskEngine y no selecciona hiperparametros.
@@ -16,9 +17,11 @@ from __future__ import annotations
 
 import bisect
 import math
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, Iterable, Optional, Tuple
+from types import MappingProxyType
+from typing import Iterable, Mapping, Optional, Tuple
 
 from backend.economia.edge_empirico import NOMBRES_FEATURES, _percentil_float, _vector_crudo
 from backend.economia.edge_historico import EstadoHistorico, ObservacionEdge
@@ -45,7 +48,7 @@ class ModeloEdgeCeldas:
     min_timestamps: int
     max_radio: int
     discretizaciones: Tuple[DiscretizacionFeature, ...]
-    celdas: Dict[Tuple[int, ...], Tuple[ObservacionEdge, ...]]
+    celdas: Mapping[Tuple[int, ...], Tuple[ObservacionEdge, ...]]
     n_muestras_train: int
     min_timestamp_train: int
     max_timestamp_train: int
@@ -60,6 +63,8 @@ class EstimacionEdgeCeldas:
     n_muestras: int
     n_symbols_unicos: int
     n_timestamps_unicos: int
+    max_symbol_share: Optional[Decimal]
+    max_timestamp_share: Optional[Decimal]
     retorno_esperado: Optional[Decimal]
     retorno_p25: Optional[Decimal]
     retorno_p50: Optional[Decimal]
@@ -157,10 +162,10 @@ def ajustar_modelo_celdas(
     vectores_ordenados = tuple(p[1] for p in pares)
     discretizaciones = _ajustar_discretizaciones(vectores_ordenados, n_bins)
 
-    agrupadas: Dict[Tuple[int, ...], list[ObservacionEdge]] = {}
+    agrupadas: dict[Tuple[int, ...], list[ObservacionEdge]] = {}
     for o, v in zip(datos_ordenados, vectores_ordenados):
         agrupadas.setdefault(_clave(v, discretizaciones), []).append(o)
-    celdas = {
+    celdas_dict = {
         k: tuple(v)
         for k, v in sorted(agrupadas.items(), key=lambda item: item[0])
     }
@@ -173,7 +178,7 @@ def ajustar_modelo_celdas(
         min_timestamps=min_timestamps,
         max_radio=max_radio,
         discretizaciones=discretizaciones,
-        celdas=celdas,
+        celdas=MappingProxyType(celdas_dict),
         n_muestras_train=len(datos_ordenados),
         min_timestamp_train=datos_ordenados[0].estado.timestamp_ms,
         max_timestamp_train=datos_ordenados[-1].estado.timestamp_ms,
@@ -192,10 +197,23 @@ def _distancia_manhattan_celda(a: Tuple[int, ...], b: Tuple[int, ...]) -> int:
     return sum(abs(x - y) for x, y in zip(a, b))
 
 
+def _concentracion(muestras: Tuple[ObservacionEdge, ...]) -> tuple[Optional[Decimal], Optional[Decimal]]:
+    if not muestras:
+        return None, None
+    n = Decimal(len(muestras))
+    symbols = Counter(o.estado.symbol for o in muestras)
+    timestamps = Counter(o.estado.timestamp_ms for o in muestras)
+    return (
+        Decimal(max(symbols.values())) / n,
+        Decimal(max(timestamps.values())) / n,
+    )
+
+
 def _sin_estimacion(modelo: ModeloEdgeCeldas, *, motivo: str,
                     clave: Optional[Tuple[int, ...]] = None,
                     radio: Optional[int] = None,
                     muestras: Tuple[ObservacionEdge, ...] = ()) -> EstimacionEdgeCeldas:
+    max_symbol_share, max_timestamp_share = _concentracion(muestras)
     return EstimacionEdgeCeldas(
         estado=NO_DISPONIBLE,
         horizonte_horas=modelo.horizonte_horas,
@@ -204,6 +222,8 @@ def _sin_estimacion(modelo: ModeloEdgeCeldas, *, motivo: str,
         n_muestras=len(muestras),
         n_symbols_unicos=len({o.estado.symbol for o in muestras}),
         n_timestamps_unicos=len({o.estado.timestamp_ms for o in muestras}),
+        max_symbol_share=max_symbol_share,
+        max_timestamp_share=max_timestamp_share,
         retorno_esperado=None, retorno_p25=None, retorno_p50=None,
         retorno_p75=None, prob_retorno_positivo=None,
         mfe_p50=None, mae_p50=None,
@@ -242,6 +262,7 @@ def estimar_edge_celdas(modelo: ModeloEdgeCeldas,
                 and n_symbols >= modelo.min_symbols
                 and n_timestamps >= modelo.min_timestamps):
             resumen = resumir_horizonte(muestras_t, modelo.horizonte_horas)
+            max_symbol_share, max_timestamp_share = _concentracion(muestras_t)
             return EstimacionEdgeCeldas(
                 estado=DISPONIBLE,
                 horizonte_horas=modelo.horizonte_horas,
@@ -250,6 +271,8 @@ def estimar_edge_celdas(modelo: ModeloEdgeCeldas,
                 n_muestras=len(muestras_t),
                 n_symbols_unicos=n_symbols,
                 n_timestamps_unicos=n_timestamps,
+                max_symbol_share=max_symbol_share,
+                max_timestamp_share=max_timestamp_share,
                 retorno_esperado=resumen.retorno_medio,
                 retorno_p25=resumen.retorno_p25,
                 retorno_p50=resumen.retorno_p50,
