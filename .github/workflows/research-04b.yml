@@ -1,0 +1,66 @@
+name: research-04b
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-04b-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ""
+  INITIAL_CAPITAL_USD: "500"
+  LIMITE_ASIGNACION_POR_OPERACION: "0.02"
+  BINANCE_API_KEY: ""
+  BINANCE_API_SECRET: ""
+  SECRET_KEY: ci-research-only-synthetic-key-04b-2026
+
+jobs:
+  falsification:
+    if: github.head_ref == 'agent/bot-2.0-04b1-edge-empirico'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Assert TEST 2026 is locked
+        run: |
+          python - <<'PY'
+          from backend.economia.protocolo_experimento_edge import CORTE_TEST_MS
+          from pathlib import Path
+          src = Path('scripts/run_edge_falsacion.py').read_text(encoding='utf-8')
+          assert 'CORTE_TEST_MS - 1' in src
+          print(f'TEST locked from timestamp {CORTE_TEST_MS}; runner ends at TEST-1ms')
+          PY
+
+      - name: Run Phase A historical falsification
+        run: python scripts/run_edge_falsacion.py
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-validation-2025
+          path: artifacts/edge-validation-2025.json
+          if-no-files-found: error
+          retention-days: 7
