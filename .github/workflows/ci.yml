@@ -41,7 +41,18 @@ jobs:
           pip install -r requirements-dev.txt -c constraints.txt
 
       - name: Python test suite
-        run: pytest -q
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee pytest-output.txt
+
+      - name: Upload pytest output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: pytest-output.txt
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Compile backend
         run: python -m compileall backend
