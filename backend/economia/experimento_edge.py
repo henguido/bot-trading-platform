@@ -1,8 +1,8 @@
 """Orquestacion OFFLINE del experimento predeclarado de Expected Edge.
 
 No se importa desde main.py. No llama GPT, RiskEngine ni ejecuta ordenes.
-Descarga/procesa un simbolo por vez para limitar memoria y conserva solo la
-rejilla base de 4 h; los horizontes 8/12/24 son subconjuntos de esa rejilla.
+Descarga/procesa un simbolo por vez para limitar memoria. El protocolo usa
+velas 4h: 4/8/12/24h son multiplos exactos y el estado 24h usa seis velas.
 
 TEST 2026 permanece bloqueado: `evaluar_validacion_predeclarada` elimina de
 forma explicita cualquier observacion >= CORTE_TEST_MS antes de evaluar.
@@ -17,18 +17,19 @@ from typing import Iterable, Optional, Sequence, Tuple
 from backend.economia.dataset_edge import construir_dataset
 from backend.economia.edge_historico import ObservacionEdge
 from backend.economia.historico_binance import descargar_klines_rango
-from backend.economia.muestreo_edge import submuestrear_no_solapado
 from backend.economia.protocolo_experimento_edge import (
     COBERTURA_MINIMA_VALIDACION,
     CORTE_TEST_MS,
     DATASET_DESDE_MS,
     DATASET_HASTA_MS,
-    FASE_REJILLA_HORAS,
     FOLDS_MINIMOS_CON_UPLIFT_POSITIVO,
     FOLDS_VALIDACION_2025,
+    INTERVALO_HORAS,
+    INTERVALO_KLINE,
     SURVIVORSHIP_PENDIENTE,
     UNIVERSO_FALSACION,
     UNIVERSO_FUENTE,
+    VENTANA_ESTADO_HORAS,
     ConfiguracionCeldas,
     configuraciones_predeclaradas,
 )
@@ -46,13 +47,12 @@ class ResumenDescargaSimbolo:
     fin_open_ms: Optional[int]
     n_gaps: int
     horas_faltantes_estimadas: int
-    n_observaciones_horarias: int
-    n_observaciones_base_h4: int
+    n_observaciones_4h: int
 
 
 @dataclass(frozen=True)
 class DatasetFalsacion:
-    observaciones_base_h4: Tuple[ObservacionEdge, ...]
+    observaciones_4h: Tuple[ObservacionEdge, ...]
     descargas: Tuple[ResumenDescargaSimbolo, ...]
     universo_fuente: str
     sesgo_supervivencia_pendiente: bool
@@ -89,13 +89,13 @@ def preparar_dataset_falsacion(
     start_ms: int = DATASET_DESDE_MS,
     end_ms: int = DATASET_HASTA_MS,
 ) -> DatasetFalsacion:
-    """Descarga/procesa secuencialmente y descarta la serie cruda tras cada symbol."""
+    """Descarga/procesa cada symbol por separado y conserva solo observaciones 4h."""
     observaciones = []
     resumenes = []
 
     for symbol in tuple(symbols):
         descarga = descargar_klines_rango(
-            binance, symbol, interval="1h",
+            binance, symbol, interval=INTERVALO_KLINE,
             start_ms=start_ms, end_ms=end_ms, limit=1000)
         if not descarga.completa:
             resumenes.append(ResumenDescargaSimbolo(
@@ -103,20 +103,19 @@ def preparar_dataset_falsacion(
                 n_requests=descarga.n_requests, n_velas=0,
                 inicio_open_ms=None, fin_open_ms=None,
                 n_gaps=0, horas_faltantes_estimadas=0,
-                n_observaciones_horarias=0, n_observaciones_base_h4=0))
+                n_observaciones_4h=0))
             continue
 
-        # construir_dataset sobre UN simbolo limita el pico de memoria. Tras
-        # extraer cobertura + rejilla h4, las velas/obs horarias pueden liberarse.
+        # construir_dataset sobre UN simbolo limita el pico de memoria. Como la
+        # resolucion ya es 4h no existe una serie horaria intermedia que guardar.
         manifiesto = construir_dataset(
-            {symbol: descarga.velas}, intervalo_horas=1, ventana_horas=24,
+            {symbol: descarga.velas},
+            intervalo_horas=INTERVALO_HORAS,
+            ventana_horas=VENTANA_ESTADO_HORAS,
             universo_fuente=UNIVERSO_FUENTE,
             sesgo_supervivencia_pendiente=SURVIVORSHIP_PENDIENTE)
         cobertura = manifiesto.coberturas[0]
-        base_h4 = submuestrear_no_solapado(
-            manifiesto.observaciones,
-            horizonte_horas=4, fase_horas=FASE_REJILLA_HORAS)
-        observaciones.extend(base_h4)
+        observaciones.extend(manifiesto.observaciones)
         resumenes.append(ResumenDescargaSimbolo(
             symbol=symbol, completa=True, error=None,
             n_requests=descarga.n_requests, n_velas=cobertura.n_velas,
@@ -124,13 +123,12 @@ def preparar_dataset_falsacion(
             fin_open_ms=cobertura.fin_open_ms,
             n_gaps=cobertura.n_gaps,
             horas_faltantes_estimadas=cobertura.horas_faltantes_estimadas,
-            n_observaciones_horarias=cobertura.n_observaciones,
-            n_observaciones_base_h4=len(base_h4),
+            n_observaciones_4h=cobertura.n_observaciones,
         ))
 
     observaciones.sort(key=lambda o: (o.estado.timestamp_ms, o.estado.symbol))
     return DatasetFalsacion(
-        observaciones_base_h4=tuple(observaciones),
+        observaciones_4h=tuple(observaciones),
         descargas=tuple(resumenes),
         universo_fuente=UNIVERSO_FUENTE,
         sesgo_supervivencia_pendiente=SURVIVORSHIP_PENDIENTE,
