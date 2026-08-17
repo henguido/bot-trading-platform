@@ -63,7 +63,10 @@ def test_coste_llm_configurado_se_puede_asignar_al_modelo():
     # IA sola representa ~8.4475 bps sobre 10 USDT.
     ia_bps = costo / 10 * 10_000
     assert ia_bps == pytest.approx(8.4475)
-    assert float(e.total_bps) == pytest.approx(58.4475)
+    # fees 10x2 = 20, slippage 5x2 = 10, spread UNA vez = 10, IA = 8.4475.
+    # El spread se cobra una sola vez por round-trip (medio al entrar, medio al
+    # salir), como fija test_spread_roundtrip_se_cobra_una_vez_no_dos.
+    assert float(e.total_bps) == pytest.approx(48.4475)
 
 
 def test_04a_no_modifica_la_comision_realizada():
