@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/bot-2.0-04b1-edge-empirico
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
