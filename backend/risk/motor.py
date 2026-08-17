@@ -42,6 +42,20 @@ class PropuestaOperacion:
 
 
 @dataclass(frozen=True)
+class LimiteCompra:
+    """
+    Importe maximo que el motor autoriza para UNA compra, y que limite manda.
+
+    Se extrajo de `_evaluar_compra` en la fase 03A para que el Eligibility Gate
+    pueda preguntar "cuanto se autorizaria aqui" SIN duplicar la formula. Existe
+    una sola aritmetica de sizing de compra en el proyecto y es esta.
+    """
+    quote_permitido: float
+    limite: str
+    reglas: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DecisionRiesgo:
     aprobado: bool
     symbol: str
@@ -92,6 +106,39 @@ class MotorRiesgo:
         Se basa en P&L realizado, no en fluctuaciones no realizadas.
         """
         return estado.pnl_realizado_dia <= -self.max_perdida_diaria
+
+    # ── Dimensionamiento de compra: UNICA fuente de verdad ───────────────────
+    def limite_compra(self, *, capital_disponible: float, estado: EstadoRiesgo,
+                      symbol: str) -> LimiteCompra:
+        """
+        Importe maximo autorizado para comprar `symbol`, y el limite que manda.
+
+        Es la UNICA aritmetica de sizing de compra del proyecto. `_evaluar_compra`
+        la usa para decidir y el Eligibility Gate (03A) la usa para descartar
+        candidatos ANTES de gastar IA. Que sea la misma llamada -y no una copia-
+        es lo que garantiza que el filtro previo y la decision final no puedan
+        discrepar.
+
+        Funcion PURA: no lee configuracion nueva, no consulta nada, no muta. La
+        cantidad propuesta por el modelo no participa.
+
+        No aplica los filtros del exchange: aqui solo vive el limite de RIESGO.
+        `min_notional`, `LOT_SIZE` y compania se comprueban despues, contra este
+        importe, y nunca elevandolo.
+        """
+        margen_total = self.max_exposicion_total - estado.exposicion_total
+        margen_activo = self.max_exposicion_activo - estado.exposicion_de(symbol)
+
+        candidatos = {
+            "MONTO_MAXIMO_USDT": self.monto_maximo_usdt,
+            "LIMITE_ASIGNACION_POR_OPERACION": capital_disponible * self.limite_asignacion,
+            "capital_disponible": capital_disponible,
+            "MAX_EXPOSICION_TOTAL_USDT": margen_total,
+            "MAX_EXPOSICION_POR_ACTIVO_USDT": margen_activo,
+        }
+        limite = min(candidatos, key=candidatos.get)
+        return LimiteCompra(quote_permitido=candidatos[limite], limite=limite,
+                            reglas=tuple(candidatos.keys()))
 
     # ── Evaluacion ───────────────────────────────────────────────────────────
     def evaluar(self, propuesta: PropuestaOperacion, *, capital_disponible: float,
@@ -153,20 +200,11 @@ class MotorRiesgo:
 
         # ── DIMENSIONAMIENTO DESDE CERO ─────────────────────────────────────
         # La cantidad propuesta por el modelo NO participa en este calculo.
-        margen_total = self.max_exposicion_total - estado.exposicion_total
-        margen_activo = self.max_exposicion_activo - estado.exposicion_de(p.symbol)
-
-        candidatos = {
-            "MONTO_MAXIMO_USDT": self.monto_maximo_usdt,
-            "LIMITE_ASIGNACION_POR_OPERACION": capital_disponible * self.limite_asignacion,
-            "capital_disponible": capital_disponible,
-            "MAX_EXPOSICION_TOTAL_USDT": margen_total,
-            "MAX_EXPOSICION_POR_ACTIVO_USDT": margen_activo,
-        }
-        reglas.extend(candidatos.keys())
-
-        limite_violado = min(candidatos, key=candidatos.get)
-        quote_permitido = candidatos[limite_violado]
+        lim = self.limite_compra(capital_disponible=capital_disponible,
+                                 estado=estado, symbol=p.symbol)
+        reglas.extend(lim.reglas)
+        limite_violado = lim.limite
+        quote_permitido = lim.quote_permitido
 
         if not es_cantidad_valida(quote_permitido):
             return DecisionRiesgo(

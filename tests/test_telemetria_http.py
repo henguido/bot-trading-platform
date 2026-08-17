@@ -1086,10 +1086,15 @@ class _Parar(BaseException):
     """
 
 
+# Filtros completos: el Eligibility Gate (03A) exige LOT_SIZE + NOTIONAL y es
+# fail-closed sin ellos. minNotional bajo para que la compra sea posible con el
+# capital del doble de cartera.
 SIMBOLOS = [
     {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT",
      "status": "TRADING", "isSpotTradingAllowed": True,
-     "filters": [{"filterType": "NOTIONAL", "minNotional": "1.0"}]},
+     "filters": [{"filterType": "NOTIONAL", "minNotional": "0.10"},
+                 {"filterType": "LOT_SIZE", "minQty": "0.00001",
+                  "maxQty": "9000.00000000", "stepSize": "0.00001"}]},
 ]
 
 
@@ -1165,10 +1170,14 @@ def bucle(monkeypatch, bd):
                         lambda symbols_info=None, snapshot=None, medidor=None: [])
     monkeypatch.setattr(main, "mercado_ny_abierto", lambda: False)
     monkeypatch.setattr(main, "precio_medio_de", lambda estado, symbol: None)
+    from backend.risk import reloj
+    from backend.risk.estado import EstadoRiesgo
     monkeypatch.setattr(main, "construir_cartera",
                         lambda **k: SimpleNamespace(
                             modo="PAPER", capital_disponible=lambda: 20.0,
-                            cantidad_disponible=lambda s: 0.0))
+                            cantidad_disponible=lambda s: 0.0,
+                            estado_riesgo=lambda: EstadoRiesgo(
+                                dia=reloj.dia_de_riesgo())))
 
     def llm_falso(*a, **k):
         registro["llm"].append({"ciclo": k.get("ciclo"),

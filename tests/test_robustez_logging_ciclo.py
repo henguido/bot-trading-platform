@@ -298,21 +298,33 @@ def test_el_manejador_no_vuelve_a_imprimir_en_crudo():
 
 
 def test_el_scheduling_del_manejador_no_ha_cambiado():
-    """La correccion no toca la espera ni el contador de ciclos."""
-    sleeps, incrementos = [], []
+    """
+    La correccion de robustez no toca la espera ni el contador de ciclos.
+
+    En la fase 03A la espera se traslado del manejador al `finally`, para que la
+    telemetria se persista ANTES de dormir. El manejador conserva su
+    `ciclo += 1` y marca que hay que esperar; la unica espera de WAIT_TIME vive
+    ahora en el finally y la fija tests/test_persistencia_antes_de_esperar.py.
+    """
+    marcas, incrementos = [], []
     for h in _manejador_principal():
         for nodo in ast.walk(h):
-            if isinstance(nodo, ast.Call) and getattr(nodo.func, "attr", None) == "sleep":
-                sleeps.append(nodo)
+            if isinstance(nodo, ast.Call) and \
+                    getattr(nodo.func, "attr", None) == "sleep":
+                pytest.fail(f"linea {nodo.lineno}: el manejador no debe dormir "
+                            f"antes de que el finally vuelque la telemetria")
+            if (isinstance(nodo, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "esperar_ciclo"
+                            for t in nodo.targets)):
+                marcas.append(nodo)
             if (isinstance(nodo, ast.AugAssign)
                     and isinstance(nodo.target, ast.Name)
                     and nodo.target.id == "ciclo"):
                 incrementos.append(nodo)
 
-    assert len(sleeps) == 1 and len(incrementos) == 1
-    assert ast.dump(sleeps[0].args[0]) == ast.dump(
-        ast.parse("settings.WAIT_TIME", mode="eval").body), \
-        "el manejador debe seguir esperando settings.WAIT_TIME"
+    assert len(marcas) == 1, "el manejador debe seguir pidiendo UNA espera"
+    assert len(incrementos) == 1, \
+        "y seguir avanzando el ciclo exactamente una vez"
 
 
 def test_la_correccion_no_toca_riesgo_decisiones_ni_modo():

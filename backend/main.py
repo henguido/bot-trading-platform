@@ -30,6 +30,7 @@ from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
+from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
@@ -259,6 +260,22 @@ def trading_loop():
         # identifica un recorrido. `ciclo` se guarda como `ciclo_num`, solo
         # como dato diagnostico legacy.
         medidor = MedidorCicloHttp(nuevo_ciclo_id(), ciclo_num=ciclo)
+        # ── PERSISTIR ANTES DE ESPERAR ────────────────────────────────────────
+        # Las salidas tempranas del ciclo hacian `time.sleep(WAIT_TIME)` DENTRO
+        # del try, o sea ANTES del `finally` que vuelca la telemetria. El
+        # `finally` garantizaba que se volcase, pero no que se volcase pronto:
+        # con WAIT_TIME=14400 el dato tardaba 4 horas en aparecer.
+        #
+        # Con 03A "0 elegibles" es un resultado NORMAL del ciclo, asi que ese
+        # retraso dejaba sin observar justo el caso que interesa. Ahora las
+        # ramas solo MARCAN que hay que esperar y el sueno ocurre en el
+        # `finally`, detras del volcado:
+        #
+        #     fin logico del ciclo -> volcar() -> WAIT_TIME -> siguiente
+        #
+        # La cadencia no cambia: cada rama espera exactamente las veces que
+        # esperaba antes -una-, y la salida normal sigue sin esperar.
+        esperar_ciclo = False
         try:
             # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────
             contexto = cargar_contexto_usuario()
@@ -268,7 +285,7 @@ def trading_loop():
             if contexto.usuario_id is None:
                 print("[BOT] Sin usuarios registrados todavia. "
                       "Esperando a que alguien complete /signup...")
-                time.sleep(settings.WAIT_TIME)
+                esperar_ciclo = True
                 continue
 
             # ── RECONCILIACION antes de operar (P0-14) ───────────────────
@@ -303,13 +320,13 @@ def trading_loop():
                     medidor=medidor)
             except Exception as e:
                 print(f"❌ Error al inicializar Binance o traer datos: {e}")
-                time.sleep(settings.WAIT_TIME)
+                esperar_ciclo = True
                 ciclo += 1
                 continue
 
             if not assets_disponibles:
                 print("⚠️ No se encontraron activos disponibles.")
-                time.sleep(settings.WAIT_TIME)
+                esperar_ciclo = True
                 ciclo += 1
                 continue
 
@@ -337,7 +354,7 @@ def trading_loop():
 
             if not activos_evaluar:
                 print("⌛ Esperando el siguiente ciclo válido...")
-                time.sleep(settings.WAIT_TIME)
+                esperar_ciclo = True
                 ciclo += 1
                 continue
 
@@ -382,6 +399,22 @@ def trading_loop():
                 snapshot=snapshot_precios,
                 medicion=medidor.operacion("binance", "get_multiple_prices"))
 
+            # ── ELIGIBILITY GATE (Fase BOT 2.0-03A) ──────────────────────────
+            # Estado y filtros se resuelven UNA vez por ciclo; el resto es
+            # aritmetica pura por activo. El gate solo QUITA candidatos: el
+            # MotorRiesgo sigue siendo la unica autoridad y vuelve a evaluar de
+            # cero cada decision aprobada por el LLM.
+            #
+            # El estado es el del INICIO del ciclo, igual que el que usaria la
+            # primera decision. Si durante el ciclo se libera margen, el gate
+            # habra sido algo mas estricto de lo necesario; nunca al contrario,
+            # y nunca autoriza nada por su cuenta.
+            info_por_symbol = {s["symbol"]: s for s in symbols_info}
+            estado_gate = cartera.estado_riesgo()
+            capital_gate = cartera.capital_disponible()
+            gate = elegibilidad.ResumenElegibilidad(universo=len(activos_evaluar))
+            inicio_gate = time.perf_counter()
+
             for asset in activos_evaluar:
                 symbol = asset["symbol"]
                 tipo = asset["type"]
@@ -404,6 +437,29 @@ def trading_loop():
                 position_detected = qty > 0
                 balance_detected = position_detected
 
+                # ── Puerta de elegibilidad (03A) ──────────────────────────
+                # Una posicion ABIERTA entra SIEMPRE, aunque no fuese elegible
+                # para comprar: el bot nunca puede quedarse sin poder analizar
+                # -y por tanto vender- lo que ya tiene. La elegibilidad es de
+                # COMPRA NUEVA y solo se aplica a quien no tiene posicion.
+                if position_detected:
+                    gate.preservar(symbol)
+                else:
+                    veredicto = elegibilidad.evaluar_compra(
+                        symbol,
+                        symbol_info=info_por_symbol.get(symbol),
+                        precio=precio,
+                        # Mismo calculo que usara despues el MotorRiesgo: se le
+                        # pregunta a el, no se replica su formula.
+                        max_notional_autorizado=motor_riesgo.limite_compra(
+                            capital_disponible=capital_gate,
+                            estado=estado_gate,
+                            symbol=symbol).quote_permitido,
+                    )
+                    gate.anotar(veredicto)
+                    if not veredicto.elegible:
+                        continue
+
                 # Coste base leido de la BD en ESTA iteracion, no en el arranque.
                 # None cuando no hay posicion registrada: enviar 0.0 al modelo
                 # le haria leer "compre a cero" en vez de "no tengo coste base".
@@ -422,13 +478,15 @@ def trading_loop():
                     "_position_detected": position_detected
                 })
 
+            print(gate.linea(int((time.perf_counter() - inicio_gate) * 1000)))
+
             activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))
 
             print(f"🎯 Enviando {len(activos_para_gpt)} activos a GPT para análisis")
 
             if not activos_para_gpt:
                 print("⚠️ No hay activos para analizar con GPT")
-                time.sleep(settings.WAIT_TIME)
+                esperar_ciclo = True
                 continue
 
             # Obtener portafolio y pares
@@ -600,7 +658,7 @@ def trading_loop():
             # Lo unico que cambia es que informar ya no puede lanzar y matar el
             # hilo antes de llegar a la espera (ver reportar_error_de_ciclo).
             reportar_error_de_ciclo(e)
-            time.sleep(settings.WAIT_TIME)
+            esperar_ciclo = True
             ciclo += 1
         finally:
             # El bucle sale de la iteracion por muchas rutas distintas (varios
@@ -612,6 +670,14 @@ def trading_loop():
             # persistencia falla, este ciclo termina exactamente igual que sin
             # telemetria.
             medidor.volcar()
+
+            # La espera va DESPUES del volcado. No se espera si estamos saliendo
+            # por una excepcion que el bucle no controla (Ctrl-C, cierre del
+            # proceso): dormir 4 horas antes de propagarla dejaria el apagado
+            # colgado. `sys.exc_info()` en un finally solo trae algo cuando hay
+            # una excepcion en vuelo sin manejar.
+            if esperar_ciclo and sys.exc_info()[0] is None:
+                time.sleep(settings.WAIT_TIME)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

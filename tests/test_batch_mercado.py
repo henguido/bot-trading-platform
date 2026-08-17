@@ -30,7 +30,10 @@ CONECTOR = RAIZ / "backend" / "connectors" / "crypto" / "binance_connector.py"
 COLECTOR = RAIZ / "backend" / "utils" / "asset_collector.py"
 MAIN = RAIZ / "backend" / "main.py"
 
-FILTROS = [{"filterType": "NOTIONAL", "minNotional": "1.0"}]
+# Filtros completos: el Eligibility Gate (03A) es fail-closed sin LOT_SIZE.
+FILTROS = [{"filterType": "NOTIONAL", "minNotional": "0.10"},
+           {"filterType": "LOT_SIZE", "minQty": "0.00001",
+            "maxQty": "9000.00000000", "stepSize": "0.00001"}]
 
 # Fixture de exchange_info con los casos que importan.
 EXCHANGE_INFO = {"symbols": [
@@ -423,10 +426,16 @@ def ciclo(monkeypatch):
                         lambda total=6, medidor=None: ["n1", "n2"])
     monkeypatch.setattr(main, "mercado_ny_abierto", lambda: False)
     monkeypatch.setattr(main, "precio_medio_de", lambda estado, symbol: None)
+    from backend.risk import reloj
+    from backend.risk.estado import EstadoRiesgo
+    # Capital holgado para que los 4 activos USDT del fixture sean elegibles y
+    # el ciclo llegue al LLM: aqui se mide trafico HTTP, no elegibilidad.
     monkeypatch.setattr(main, "construir_cartera",
                         lambda **k: SimpleNamespace(
-                            modo="PAPER", capital_disponible=lambda: 20.0,
-                            cantidad_disponible=lambda s: 0.0))
+                            modo="PAPER", capital_disponible=lambda: 1000.0,
+                            cantidad_disponible=lambda s: 0.0,
+                            estado_riesgo=lambda: EstadoRiesgo(
+                                dia=reloj.dia_de_riesgo())))
 
     def llm_falso(*a, **k):
         registro["llm"].append(k | {"activos": a[0] if a else None})
