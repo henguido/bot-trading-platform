@@ -9,6 +9,10 @@ en observaciones auditables:
 La separacion es deliberada para impedir look-ahead. El scanner 03B usa ademas
 spread bid/ask, que NO puede reconstruirse con klines; por tanto este modulo no
 pretende reproducir su score historico exacto.
+
+Binance Vision usa microsegundos en archivos Spot recientes mientras el REST
+tradicional entrega timestamps en milisegundos. Internamente TODO se normaliza
+a milisegundos antes de construir continuidad, splits o labels.
 """
 from __future__ import annotations
 
@@ -18,6 +22,8 @@ from typing import Iterable, Sequence, Tuple
 
 HORIZONTES_EXPLORATORIOS_HORAS = (4, 8, 12, 24)
 VENTANA_ESTADO_HORAS = 24
+_UMBRAL_MICROSEGUNDOS = 100_000_000_000_000       # 1e14
+_UMBRAL_NANOSEGUNDOS = 100_000_000_000_000_000    # 1e17
 
 
 def _decimal(valor, nombre: str) -> Decimal:
@@ -39,6 +45,22 @@ def _entero(valor, nombre: str) -> int:
         i = int(valor)
     except (TypeError, ValueError):
         raise ValueError(f"{nombre} no entero") from None
+    return i
+
+
+def _timestamp_ms(valor, nombre: str) -> int:
+    """Acepta ms o us de Binance y devuelve SIEMPRE milisegundos.
+
+    Magnitudes >=1e17 se rechazan: este pipeline solo declara soporte para las
+    dos unidades que Binance documenta/usa en las fuentes contempladas.
+    """
+    i = _entero(valor, nombre)
+    if i < 0:
+        raise ValueError(f"{nombre} negativo")
+    if i >= _UMBRAL_NANOSEGUNDOS:
+        raise ValueError(f"{nombre} unidad no soportada")
+    if i >= _UMBRAL_MICROSEGUNDOS:
+        return i // 1000
     return i
 
 
@@ -89,21 +111,21 @@ class ObservacionEdge:
 
 
 def vela_desde_kline(fila) -> Vela:
-    """Convierte la fila estandar de Binance Spot en una Vela validada."""
+    """Convierte una fila Binance Spot (REST o Vision) en Vela validada."""
     if not isinstance(fila, (list, tuple)) or len(fila) < 9:
         raise ValueError("kline incompleto")
 
-    t0 = _entero(fila[0], "open_time_ms")
+    t0 = _timestamp_ms(fila[0], "open_time")
     o = _decimal(fila[1], "open")
     h = _decimal(fila[2], "high")
     l = _decimal(fila[3], "low")
     c = _decimal(fila[4], "close")
     vol = _decimal(fila[5], "volume")
-    t1 = _entero(fila[6], "close_time_ms")
+    t1 = _timestamp_ms(fila[6], "close_time")
     qv = _decimal(fila[7], "quote_volume")
     trades = _entero(fila[8], "trades")
 
-    if t0 < 0 or t1 <= t0:
+    if t1 <= t0:
         raise ValueError("timestamps de kline invalidos")
     if min(o, h, l, c) <= 0:
         raise ValueError("precios deben ser positivos")
@@ -151,9 +173,9 @@ def construir_observaciones(
 ) -> Tuple[ObservacionEdge, ...]:
     """Construye observaciones sin look-ahead y omite cualquier ventana con gaps.
 
-    Para el estado de 24h se usan las ultimas 24 velas INCLUYENDO t, y para el
-    momentum se compara close(t) contra close(t-24h), por lo que hacen falta 25
-    cierres contiguos. Las etiquetas usan exclusivamente velas t+1..t+h.
+    El estado usa `ventana_horas / intervalo_horas` velas incluyendo t y el
+    momentum compara close(t) con close(t-ventana_horas). Las etiquetas usan
+    exclusivamente velas futuras t+1..t+h.
 
     Un hueco temporal no se rellena ni se interpreta como una vela plana: la
     observacion completa se omite. Desconocido no es cero.
@@ -180,7 +202,7 @@ def construir_observaciones(
         return 0 <= a <= b < n and rupturas[b] == rupturas[a]
 
     salida = []
-    # i necesita close(t-ventana), 24 barras de estado y futuro max_h.
+    # i necesita close(t-ventana), barras de estado y futuro max_h.
     for i in range(ventana_barras, n - max_pasos):
         inicio_hist = i - ventana_barras
         fin_futuro = i + max_pasos
@@ -196,7 +218,7 @@ def construir_observaciones(
         high24 = max(v.high for v in actuales)
         qv24 = sum((v.quote_volume for v in actuales), Decimal("0"))
         trades24 = sum(v.trades for v in actuales)
-        close_24h_atras = velas[inicio_hist].close
+        close_ventana_atras = velas[inicio_hist].close
 
         estado = EstadoHistorico(
             symbol=symbol,
@@ -205,7 +227,7 @@ def construir_observaciones(
             quote_volume_24h=qv24,
             trades_24h=trades24,
             rango_24h=(high24 - low24) / low24,
-            momentum_cierre_24h_pct=((entrada / close_24h_atras) - Decimal("1")) * Decimal("100"),
+            momentum_cierre_24h_pct=((entrada / close_ventana_atras) - Decimal("1")) * Decimal("100"),
         )
 
         etiquetas = []
