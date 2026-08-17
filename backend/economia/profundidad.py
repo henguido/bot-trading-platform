@@ -7,7 +7,8 @@ pura; este módulo sólo adquiere el libro.
 """
 from __future__ import annotations
 
-from backend.telemetria_http import OPERACION_NULA, anotar_elementos
+from backend.telemetria_http import (OPERACION_NULA, anotar_elementos,
+                                     describir_error)
 
 
 def obtener_order_book(binance, symbol: str, *, limit: int = 20, medicion=None):
@@ -28,7 +29,7 @@ def obtener_order_book(binance, symbol: str, *, limit: int = 20, medicion=None):
         with op.peticion(observador=binance.observador_http()):
             book = binance.client.get_order_book(symbol=symbol, limit=limit)
     except Exception as e:
-        print(f"⚠️ No se pudo obtener profundidad de {symbol}: {type(e).__name__}: {e}")
+        print(f"⚠️ No se pudo obtener profundidad de {symbol}: {describir_error(e)}")
         return None
 
     if not isinstance(book, dict):
