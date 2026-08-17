@@ -30,6 +30,7 @@ from backend.economia.protocolo_experimento_edge import (
     CORTE_TEST_MS,
     DATASET_DESDE_MS,
     INTERVALO_KLINE,
+    MIN_DIMENSIONES_VECINAS_ROBUSTAS,
     MIN_SYMBOLS_DATASET_FALSACION,
     SURVIVORSHIP_PENDIENTE,
     UNIVERSO_FALSACION,
@@ -80,6 +81,8 @@ def _config_compacta(resultado):
             "fase_horas": c.fase_horas,
         },
         "supera_criterios_minimos": resultado.supera_criterios_minimos,
+        "robusta_grid": resultado.robusta_grid,
+        "dimensiones_vecinas_robustas": list(resultado.dimensiones_vecinas_robustas),
         "motivos_rechazo": list(resultado.motivos_rechazo),
         "folds_con_uplift_positivo": resultado.folds_con_uplift_positivo,
         "folds_cross_section_positivos": resultado.folds_cross_section_positivos,
@@ -116,7 +119,9 @@ def _manifest(dataset):
             "symbol": d.symbol,
             "completa": d.completa,
             "util_para_experimento": d.util_para_experimento,
+            "fuente": d.fuente,
             "error": d.error,
+            "error_fuente_primaria": d.error_fuente_primaria,
             "n_requests": d.n_requests,
             "n_velas": d.n_velas,
             "inicio_open_ms": d.inicio_open_ms,
@@ -158,6 +163,7 @@ def main() -> int:
         "universo_fuente": UNIVERSO_FUENTE,
         "sesgo_supervivencia_pendiente": SURVIVORSHIP_PENDIENTE,
         "min_symbols_dataset": MIN_SYMBOLS_DATASET_FALSACION,
+        "min_dimensiones_vecinas_robustas": MIN_DIMENSIONES_VECINAS_ROBUSTAS,
         "n_symbols_http_completos": dataset.n_symbols_completos,
         "n_symbols_utiles": dataset.n_symbols_utiles,
         "n_observaciones_4h": len(dataset.observaciones_4h),
@@ -170,6 +176,8 @@ def main() -> int:
             "status": "DATASET_INSUFICIENTE",
             "n_configuraciones": 0,
             "n_superan_minimos": 0,
+            "n_robustas_grid": 0,
+            "horizontes_robustos": [],
             "motivos_rechazo_conteo": {},
             "resultados": [],
         })
@@ -187,16 +195,20 @@ def main() -> int:
         for x in validacion.resultados
         for motivo in x.motivos_rechazo
     )
-    status = (
-        "CONFIGURACIONES_APTAS_VALIDACION"
-        if validacion.n_superan_minimos > 0
-        else "SIN_CONFIGURACIONES_APTAS_FASE_A"
-    )
+    if validacion.n_robustas_grid > 0:
+        status = "FAMILIA_ROBUSTA_VALIDACION"
+    elif validacion.n_superan_minimos > 0:
+        status = "APTAS_AISLADAS_SIN_ROBUSTEZ_GRID"
+    else:
+        status = "SIN_CONFIGURACIONES_APTAS_FASE_A"
+
     base.update({
         "status": status,
         "n_observaciones_desarrollo": validacion.n_observaciones_desarrollo,
         "n_configuraciones": validacion.n_configuraciones,
         "n_superan_minimos": validacion.n_superan_minimos,
+        "n_robustas_grid": validacion.n_robustas_grid,
+        "horizontes_robustos": list(validacion.horizontes_robustos),
         "motivos_rechazo_conteo": dict(sorted(conteo_motivos.items())),
         # Orden canonico predeclarado; NO se ordena por performance.
         "resultados": compactos,
@@ -205,7 +217,8 @@ def main() -> int:
     print(
         f"[04B] {status}: utiles={dataset.n_symbols_utiles}, "
         f"obs={validacion.n_observaciones_desarrollo}, "
-        f"configs={validacion.n_configuraciones}, aptas={validacion.n_superan_minimos}."
+        f"configs={validacion.n_configuraciones}, "
+        f"aptas={validacion.n_superan_minimos}, robustas={validacion.n_robustas_grid}."
     )
     return 0
 
