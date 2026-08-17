@@ -54,6 +54,11 @@ class ResumenDescargaSimbolo:
     horas_faltantes_estimadas: int
     n_observaciones_4h: int
 
+    @property
+    def util_para_experimento(self) -> bool:
+        """Una descarga vacia no cuenta como cobertura del universo."""
+        return self.completa and self.n_velas > 0 and self.n_observaciones_4h > 0
+
 
 @dataclass(frozen=True)
 class DatasetFalsacion:
@@ -64,7 +69,13 @@ class DatasetFalsacion:
 
     @property
     def n_symbols_completos(self) -> int:
+        """Compatibilidad: respuestas HTTP completas, aunque no tengan historia util."""
         return sum(d.completa for d in self.descargas)
+
+    @property
+    def n_symbols_utiles(self) -> int:
+        """Cobertura real del experimento: descarga completa + observaciones."""
+        return sum(d.util_para_experimento for d in self.descargas)
 
 
 @dataclass(frozen=True)
@@ -179,7 +190,6 @@ def _aplicar_criterios(
     if folds_positivos < FOLDS_MINIMOS_CON_UPLIFT_POSITIVO:
         motivos.append("UPLIFT_INESTABLE_ENTRE_FOLDS")
 
-    # Evidencia cross-sectional: seleccion dentro del mismo momento de mercado.
     if (resultado.uplift_cross_section_medio is None
             or resultado.uplift_cross_section_medio <= UPLIFT_CROSS_SECTION_MINIMO):
         motivos.append("SIN_UPLIFT_CROSS_SECTION")
