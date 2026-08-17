@@ -72,8 +72,8 @@ class EtiquetaHorizonte:
     """Lo ocurrido DESPUES de t; nunca debe entrar como feature."""
     horizonte_horas: int
     retorno_cierre: Decimal
-    mfe: Decimal  # max favorable excursion vs close(t)
-    mae: Decimal  # min adverse excursion vs close(t), normalmente <= 0
+    mfe: Decimal  # max favorable excursion vs close(t), siempre >= 0
+    mae: Decimal  # max adverse excursion vs close(t), siempre <= 0
 
 
 @dataclass(frozen=True)
@@ -216,8 +216,8 @@ def construir_observaciones(
             etiquetas.append(EtiquetaHorizonte(
                 horizonte_horas=h,
                 retorno_cierre=(cierre_futuro / entrada) - Decimal("1"),
-                mfe=(max_high / entrada) - Decimal("1"),
-                mae=(min_low / entrada) - Decimal("1"),
+                mfe=max(Decimal("0"), (max_high / entrada) - Decimal("1")),
+                mae=min(Decimal("0"), (min_low / entrada) - Decimal("1")),
             ))
 
         salida.append(ObservacionEdge(estado=estado, etiquetas=tuple(etiquetas)))
