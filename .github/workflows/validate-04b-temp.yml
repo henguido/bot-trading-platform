@@ -1,0 +1,51 @@
+name: validate-04b-temp
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-04b1-edge-empirico
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  INITIAL_CAPITAL_USD: "500"
+  SECRET_KEY: "ci-only-random-looking-key-not-for-production-04b-2026"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Python test suite
+        run: pytest -q
+
+      - name: Compile backend
+        run: python -m compileall backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
