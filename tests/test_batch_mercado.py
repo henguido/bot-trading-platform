@@ -90,7 +90,8 @@ class ClienteBinanceFalso:
         self.tickers = TICKERS_COMPLETOS if tickers is None else tickers
         self.exchange_info = exchange_info or EXCHANGE_INFO
         self.llamadas = {"get_exchange_info": 0, "get_all_tickers": 0,
-                         "get_account": 0, "get_symbol_ticker": 0}
+                         "get_account": 0, "get_symbol_ticker": 0,
+                         "get_ticker": 0}
         self.response = None
         self.fallo_tickers = None
 
@@ -108,6 +109,18 @@ class ClienteBinanceFalso:
             raise self.fallo_tickers
         self._responde()
         return self.tickers
+
+    def get_ticker(self, **kw):
+        """ticker/24hr completo: la unica peticion que anade el scanner (03B)."""
+        self.llamadas["get_ticker"] += 1
+        self._responde()
+        return [{"symbol": t["symbol"], "lastPrice": t["price"],
+                 "bidPrice": str(float(t["price"]) * 0.9995),
+                 "askPrice": str(float(t["price"]) * 1.0005),
+                 "quoteVolume": "1000000", "count": "5000",
+                 "highPrice": str(float(t["price"]) * 1.05),
+                 "lowPrice": t["price"], "priceChangePercent": "2.5"}
+                for t in self.tickers]
 
     def get_account(self):
         self.llamadas["get_account"] += 1
@@ -492,9 +505,11 @@ def test_un_ciclo_completo_hace_un_numero_de_peticiones_de_un_digito(ciclo):
     exchange_info + get_account + get_all_tickers = 3.
     """
     cliente, _, _ = ciclo(n=1)
+    # 03B anade exactamente UNA peticion (ticker/24hr) para el scanner.
     assert cliente.llamadas == {"get_exchange_info": 1, "get_account": 1,
-                                "get_all_tickers": 1, "get_symbol_ticker": 0}
-    assert cliente.total_peticiones == 3
+                                "get_all_tickers": 1, "get_symbol_ticker": 0,
+                                "get_ticker": 1}
+    assert cliente.total_peticiones == 4
     assert cliente.total_peticiones < 10
 
 
@@ -560,9 +575,13 @@ def test_8_la_telemetria_cuenta_el_numero_real_de_peticiones(ciclo):
     assert req[("binance", "get_market_pairs")] == 0, \
         "0 HTTP: se construye en memoria"
 
+    # 03B anade `market_metrics` (ticker/24hr), la unica peticion nueva.
+    assert req[("binance", "market_metrics")] == 1
+
     http_medido = sum(v for (p, _), v in req.items() if p == "binance")
     assert http_medido == cliente.llamadas["get_exchange_info"] \
-        + cliente.llamadas["get_account"] + cliente.llamadas["get_all_tickers"], \
+        + cliente.llamadas["get_account"] + cliente.llamadas["get_all_tickers"] \
+        + cliente.llamadas["get_ticker"], \
         "la telemetria debe cuadrar con las peticiones que el cliente vio"
 
 
@@ -573,6 +592,7 @@ def test_8b_una_peticion_no_se_atribuye_a_dos_operaciones(ciclo):
                     for o in medidores[0].operaciones()
                     if o.metricas.n_requests]
     assert sorted(con_requests) == [("account_balance", 1), ("exchange_info", 1),
+                                    ("market_metrics", 1),
                                     ("market_price_snapshot", 1)]
     assert cliente.llamadas["get_all_tickers"] == 1
 

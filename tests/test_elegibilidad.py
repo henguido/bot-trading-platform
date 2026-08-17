@@ -52,6 +52,20 @@ def simbolo(*, status="TRADING", spot=True, min_qty="0.00001",
     return info
 
 
+def _metricas_sanas(precios):
+    """
+    Metricas de ticker/24hr que pasan todos los filtros duros del scanner (03B).
+
+    Se generan a partir del precio de cada simbolo para que los fixtures del
+    bucle sigan midiendo lo que median antes del scanner.
+    """
+    return {s: {"lastPrice": str(p), "bidPrice": str(p * 0.9995),
+                "askPrice": str(p * 1.0005), "quoteVolume": "1000000",
+                "count": "5000", "highPrice": str(p * 1.05),
+                "lowPrice": str(p), "priceChangePercent": "2.5"}
+            for s, p in precios.items()}
+
+
 def estado_vacio():
     return EstadoRiesgo(dia=reloj.dia_de_riesgo())
 
@@ -511,6 +525,9 @@ def ciclo(monkeypatch):
     monkeypatch.setattr(main.binance, "get_price_snapshot",
                         lambda medicion=None: {"CAROUSDT": 100.0,
                                                "BARATOUSDT": 1.0})
+    monkeypatch.setattr(main.binance, "get_market_metrics",
+                        lambda medicion=None: _metricas_sanas(
+                            {"CAROUSDT": 100.0, "BARATOUSDT": 1.0}))
     monkeypatch.setattr(main.binance, "get_multiple_prices",
                         lambda symbols, snapshot=None, medicion=None: {
                             s: (snapshot or {}).get(s) for s in symbols
