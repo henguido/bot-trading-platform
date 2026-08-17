@@ -47,11 +47,13 @@ def _proyecto_temporal(tmp_path: Path, *, con_env_raiz=True) -> Path:
 
 def _entorno_limpio(fuente: str):
     entorno = dict(os.environ)
-    # Elimina toda variable que settings pueda leer para que la prueba mida
-    # exclusivamente el .env temporal. Se conserva el resto del entorno de SO
+    # Elimina cualquier nombre de variable de configuracion que aparezca como
+    # literal MAYUSCULO en settings. Esto cubre tanto `os.getenv('X')` como los
+    # nombres pasados a `_leer_float/_leer_int`, que no aparecen en el AST como
+    # argumentos directos de getenv. Se conserva el resto del entorno de SO
     # (importante en Windows para localizar DLLs y el runtime de Python).
-    nombres = set(re.findall(r"os\.getenv\(['\"]([^'\"]+)", fuente))
-    nombres.update({"RISK_PER_TRADE"})
+    nombres = set(re.findall(r"['\"]([A-Z][A-Z0-9_]{2,})['\"]", fuente))
+    nombres.update({"RISK_PER_TRADE", "PERMITIR_BD_REMOTA_EN_DESARROLLO"})
     for nombre in nombres:
         entorno.pop(nombre, None)
     return entorno
