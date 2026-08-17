@@ -46,7 +46,10 @@ def test_holdout_reporta_cobertura_y_metricas_brutas():
     assert r.cobertura == Decimal(r.n_estimadas) / Decimal(4)
     assert r.mae_prediccion is not None
     assert r.exactitud_direccional is not None
-    assert r.uplift_top25_vs_baseline is not None
+    # El baseline ambiguo se separo deliberadamente: subconjunto cubierto y
+    # objetivo completo. Ambos deben quedar auditables.
+    assert r.uplift_top25_vs_estimadas is not None
+    assert r.uplift_top25_vs_objetivo is not None
     assert r.radio_p50 is not None
     assert r.soporte_muestras_p50 is not None
 
