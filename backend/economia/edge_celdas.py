@@ -11,6 +11,10 @@ referencia pero no escala a millones de observaciones. Este modelo:
   * audita concentracion: ninguna cifra de soporte se interpreta a ciegas;
   * devuelve distribucion de retorno BRUTO, sin costes ni decisiones de trading.
 
+La vecindad Manhattan se enumera matematicamente. No se escanean todas las
+celdas del modelo en cada consulta: para radio 2 y cuatro features solo se
+consideran las claves cuya distancia L1 realmente puede ser <=2.
+
 No hace red, no importa scanner/LLM/RiskEngine y no selecciona hiperparametros.
 """
 from __future__ import annotations
@@ -20,6 +24,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import product
 from types import MappingProxyType
 from typing import Iterable, Mapping, Optional, Tuple
 
@@ -108,8 +113,6 @@ def _ajustar_discretizaciones(vectores: Tuple[Tuple[float, ...], ...],
         minimo, maximo = valores[0], valores[-1]
         if not (math.isfinite(minimo) and math.isfinite(maximo)):
             raise ValueError("features train no finitas")
-        # Cortes repetidos no crean informacion; se deduplican. Una feature
-        # constante queda con una sola celda y sigue siendo auditable.
         cortes = tuple(sorted(set(
             _percentil_float(valores, i / n_bins)
             for i in range(1, n_bins)
@@ -197,6 +200,28 @@ def _distancia_manhattan_celda(a: Tuple[int, ...], b: Tuple[int, ...]) -> int:
     return sum(abs(x - y) for x, y in zip(a, b))
 
 
+def _claves_en_radio(
+    clave: Tuple[int, ...],
+    radio: int,
+    discretizaciones: Tuple[DiscretizacionFeature, ...],
+) -> Tuple[Tuple[int, ...], ...]:
+    """Enumera exactamente las claves validas con distancia Manhattan <= radio."""
+    if isinstance(radio, bool) or not isinstance(radio, int) or radio < 0:
+        raise ValueError("radio invalido")
+    if len(clave) != len(discretizaciones):
+        raise ValueError("dimension de clave incompatible")
+
+    limites = tuple(len(d.cortes) for d in discretizaciones)  # indices 0..n_cortes
+    salida = []
+    for delta in product(range(-radio, radio + 1), repeat=len(clave)):
+        if sum(abs(x) for x in delta) > radio:
+            continue
+        candidata = tuple(c + d for c, d in zip(clave, delta))
+        if all(0 <= x <= limite for x, limite in zip(candidata, limites)):
+            salida.append(candidata)
+    return tuple(sorted(salida))
+
+
 def _concentracion(muestras: Tuple[ObservacionEdge, ...]) -> tuple[Optional[Decimal], Optional[Decimal]]:
     if not muestras:
         return None, None
@@ -250,8 +275,9 @@ def estimar_edge_celdas(modelo: ModeloEdgeCeldas,
     ultima_muestra: Tuple[ObservacionEdge, ...] = ()
     for radio in range(modelo.max_radio + 1):
         muestras = []
-        for clave_celda, obs in modelo.celdas.items():
-            if _distancia_manhattan_celda(clave, clave_celda) <= radio:
+        for clave_vecina in _claves_en_radio(clave, radio, modelo.discretizaciones):
+            obs = modelo.celdas.get(clave_vecina)
+            if obs:
                 muestras.extend(obs)
         muestras_t = tuple(sorted(
             muestras, key=lambda o: (o.estado.timestamp_ms, o.estado.symbol)))
