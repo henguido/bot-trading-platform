@@ -12,7 +12,9 @@ from typing import Iterable, Sequence, Tuple
 
 from backend.economia.edge_celdas import ajustar_modelo_celdas
 from backend.economia.edge_historico import ObservacionEdge
-from backend.economia.evaluacion_celdas import PrediccionCeldas, evaluar_holdout_celdas
+from backend.economia.evaluacion_celdas import (
+    PrediccionCeldas, _resumen_cross_section, evaluar_holdout_celdas,
+)
 from backend.economia.muestreo_edge import submuestrear_no_solapado
 from backend.economia.validacion_edge import HORA_MS
 from backend.economia.walk_forward_edge import FoldTemporal
@@ -56,6 +58,16 @@ class ResultadoWalkForwardCeldas:
     uplift_top25_vs_estimadas: Decimal | None
     uplift_top25_vs_objetivo: Decimal | None
     radio_p95: float | None
+    max_symbol_share_p95: float | None
+    max_timestamp_share_p95: float | None
+    n_timestamps_cross_section: int
+    uplift_cross_section_medio: Decimal | None
+    fraccion_timestamps_uplift_positivo: Decimal | None
+    n_meses_cross_section: int
+    meses_uplift_positivo: int
+    uplift_mensual_min: Decimal | None
+    uplift_mensual_p25: Decimal | None
+    uplift_mensual_p50: Decimal | None
 
 
 def _validar_fold(f: FoldTemporal) -> None:
@@ -170,25 +182,24 @@ def evaluar_walk_forward_celdas(
             )
         except ValueError as e:
             resultados.append(ResultadoFoldCeldas(
-                fold=f,
-                n_train_crudo=len(train_crudo), n_train_no_solapado=len(train),
+                fold=f, n_train_crudo=len(train_crudo),
+                n_train_no_solapado=len(train),
                 n_validacion_cruda=len(valid_cruda),
                 n_validacion_no_solapada=len(valid_obj),
-                n_descartadas_embargo=descartadas,
-                estado=NO_DISPONIBLE, predicciones=(), motivo=str(e)))
+                n_descartadas_embargo=descartadas, estado=NO_DISPONIBLE,
+                predicciones=(), motivo=str(e)))
             continue
 
         resumen = evaluar_holdout_celdas(modelo, valid_obj)
         todas_predicciones.extend(resumen.predicciones)
         resultados.append(ResultadoFoldCeldas(
-            fold=f,
-            n_train_crudo=len(train_crudo), n_train_no_solapado=len(train),
+            fold=f, n_train_crudo=len(train_crudo),
+            n_train_no_solapado=len(train),
             n_validacion_cruda=len(valid_cruda),
             n_validacion_no_solapada=len(valid_obj),
             n_descartadas_embargo=descartadas,
             estado=DISPONIBLE if resumen.predicciones else NO_DISPONIBLE,
-            predicciones=resumen.predicciones,
-            motivo=resumen.motivo,
+            predicciones=resumen.predicciones, motivo=resumen.motivo,
         ))
 
     preds = tuple(sorted(
@@ -218,6 +229,7 @@ def evaluar_walk_forward_celdas(
     uplift_objetivo = (
         real_top - objetivo_medio
         if real_top is not None and objetivo_medio is not None else None)
+    cs = _resumen_cross_section(preds)
 
     return ResultadoWalkForwardCeldas(
         horizonte_horas=horizonte_horas,
@@ -240,4 +252,14 @@ def evaluar_walk_forward_celdas(
         uplift_top25_vs_estimadas=uplift_estimadas,
         uplift_top25_vs_objetivo=uplift_objetivo,
         radio_p95=_percentil_float((p.radio_usado for p in preds), 0.95),
+        max_symbol_share_p95=_percentil_float((p.max_symbol_share for p in preds), 0.95),
+        max_timestamp_share_p95=_percentil_float((p.max_timestamp_share for p in preds), 0.95),
+        n_timestamps_cross_section=cs["n"],
+        uplift_cross_section_medio=cs["uplift"],
+        fraccion_timestamps_uplift_positivo=cs["fraccion_positivo"],
+        n_meses_cross_section=cs["n_meses"],
+        meses_uplift_positivo=cs["meses_positivos"],
+        uplift_mensual_min=cs["mensual_min"],
+        uplift_mensual_p25=cs["mensual_p25"],
+        uplift_mensual_p50=cs["mensual_p50"],
     )
