@@ -73,6 +73,9 @@ def descargar_klines_rango(
     try:
         binance.init_client()
         while cursor <= end_ms:
+            # Cuenta el intento antes de entrar: una peticion fallida tambien
+            # consume red/rate-limit y debe aparecer en el costo de la descarga.
+            n_requests += 1
             with op.peticion(observador=binance.observador_http()):
                 filas = binance.client.get_klines(
                     symbol=symbol,
@@ -81,7 +84,6 @@ def descargar_klines_rango(
                     endTime=end_ms,
                     limit=limit,
                 )
-            n_requests += 1
 
             if not filas:
                 break
