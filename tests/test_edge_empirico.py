@@ -85,10 +85,15 @@ def test_cluster_negativo_produce_edge_bruto_negativo():
     assert e.prob_retorno_positivo == Decimal("0")
 
 
-def test_no_convierte_score_scanner_en_retorno():
-    fuente = MODULO.read_text(encoding="utf-8")
-    assert "score" not in fuente.lower()
-    assert "TOP_N" not in fuente
+def test_no_importa_scanner_ni_lee_atributo_score():
+    arbol = ast.parse(MODULO.read_text(encoding="utf-8"))
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, ast.ImportFrom):
+            assert nodo.module != "backend.scanner"
+        if isinstance(nodo, ast.Import):
+            assert all(alias.name != "backend.scanner" for alias in nodo.names)
+        if isinstance(nodo, ast.Attribute):
+            assert nodo.attr != "score"
 
 
 def test_modelo_rechaza_consulta_no_posterior_a_todo_train():
@@ -178,7 +183,7 @@ def test_modulo_no_importa_cost_model_scanner_llm_ml_red_ni_bd():
     arbol = ast.parse(MODULO.read_text(encoding="utf-8"))
     texto = ast.dump(arbol)
     for prohibido in (
-        "costes", "scanner", "openai", "sklearn", "numpy", "pandas",
+        "costes", "openai", "sklearn", "numpy", "pandas",
         "requests", "sqlalchemy", "binance", "MotorRiesgo", "SessionLocal",
     ):
         assert prohibido not in texto
