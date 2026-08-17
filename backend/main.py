@@ -33,7 +33,11 @@ from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
 from backend import scanner
 from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
-from backend.portafolio.carteras import construir_cartera
+from backend.portafolio.carteras import (
+    construir_cartera,
+    contexto_posicion_para_llm,
+    portafolio_para_llm,
+)
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
 from backend.reconciliacion import reconciliar_pendientes
 from backend.telemetria_http import MedidorCicloHttp, nuevo_ciclo_id
@@ -363,7 +367,9 @@ def trading_loop():
 
             ciclo += 1  # Aquí avanzamos el ciclo después de haber intentado ejecutar
 
-            # Crear diccionario de saldos reales para acceso rápido
+            # Crear diccionario de saldos reales para acceso rápido. Solo la
+            # CarteraLive los consume; CarteraPaper no tiene parametro por el
+            # que puedan entrar a su estado ni a su contexto para IA.
             saldo_real_dict = {
                 b["asset"]: float(b["free"]) + float(b["locked"])
                 for b in balances_reales
@@ -371,14 +377,17 @@ def trading_loop():
 
             # ── Unico punto donde se decide el modo (P0-15) ──────────────────
             # A partir de aqui el bucle no vuelve a preguntar si es PAPER o
-            # LIVE. CarteraPaper ni siquiera admite saldos del broker, asi que
-            # una posicion simulada no puede ser alterada por ellos.
+            # LIVE. La cartera activa es tambien la fuente del contexto
+            # financiero que vera el LLM.
             cartera = construir_cartera(
                 modo_real=settings.MODO_REAL,
                 simulador=simulator,
                 usuario_id=contexto.usuario_id,
                 saldos_broker=saldo_real_dict,
                 usdt_broker=saldo_real_dict.get("USDT", 0.0),
+                estado_persistente=contexto.estado,
+                ultimos_movimientos=contexto.ultimos_movimientos,
+                ultimos_precios_venta=contexto.ultimos_precios_venta,
             )
             print(f"[CARTERA] modo={cartera.modo} capital={cartera.capital_disponible():.2f} USDT")
 
@@ -437,10 +446,11 @@ def trading_loop():
 
                 precios_actuales[symbol] = precio
 
-                # La cantidad la da SIEMPRE la cartera del modo activo: en
-                # PAPER el libro simulado, en LIVE el saldo del exchange.
-                # Nunca se combinan las dos fuentes (P0-15).
-                qty = cartera.cantidad_disponible(symbol)
+                # Cantidad, coste base y movimientos salen de la MISMA cartera
+                # activa. En PAPER, exclusivamente del Simulator; en LIVE,
+                # saldo broker + contexto persistente. El bucle no mezcla.
+                posicion_llm = contexto_posicion_para_llm(cartera, symbol)
+                qty = posicion_llm.cantidad
                 position_detected = qty > 0
                 balance_detected = position_detected
 
@@ -467,20 +477,13 @@ def trading_loop():
                     if not veredicto.elegible:
                         continue
 
-                # Coste base leido de la BD en ESTA iteracion, no en el arranque.
-                # None cuando no hay posicion registrada: enviar 0.0 al modelo
-                # le haria leer "compre a cero" en vez de "no tengo coste base".
-                avg_price = precio_medio_de(contexto.estado, symbol)
-                last_movement = contexto.ultimos_movimientos.get(symbol)
-                last_sell_price = contexto.ultimos_precios_venta.get(symbol)
-
                 activos_para_gpt.append({
                     "symbol": symbol,
                     "price": precio,
                     "position_quantity": qty,
-                    "average_price": avg_price,
-                    "last_movement": last_movement,
-                    "last_sell_price": last_sell_price,
+                    "average_price": posicion_llm.precio_medio,
+                    "last_movement": posicion_llm.ultimo_movimiento,
+                    "last_sell_price": posicion_llm.ultimo_precio_venta,
                     "_balance_detected": balance_detected,
                     "_position_detected": position_detected
                 })
@@ -512,21 +515,18 @@ def trading_loop():
                 esperar_ciclo = True
                 continue
 
-            # Obtener portafolio y pares
-            portafolio_real = [
-                {
-                    "moneda": b["asset"],
-                    "cantidad": round(float(b["free"]) + float(b["locked"]), 6)
-                }
-                for b in balances_reales
-                if float(b["free"]) + float(b["locked"]) > 0
-            ]
+            # El contexto auxiliar del portafolio y el capital salen de la
+            # cartera ACTIVA. `portafolio_real` era construido siempre desde
+            # balances_reales de Binance, de modo que PAPER podia enviar al LLM
+            # saldos LIVE. La firma del conector se conserva por compatibilidad,
+            # pero su argumento ahora es coherente con el modo.
+            portafolio_contexto = portafolio_para_llm(cartera)
+            usdt_disponible = cartera.capital_disponible()
 
             # Mismo snapshot, cero peticiones: se construye en memoria (02B).
             market_pairs = get_market_pairs(symbols_info,
                                             snapshot=snapshot_precios,
                                             medidor=medidor)
-            usdt_disponible = next((b["cantidad"] for b in portafolio_real if b["moneda"] == "USDT"), 0.0)
 
             # Enviar a análisis
             # 🔍 Identificar activos relevantes
@@ -555,7 +555,7 @@ def trading_loop():
                 usdt_disponible,
                 sentimiento,
                 noticias_str,
-                portafolio_real,
+                portafolio_contexto,
                 market_pairs_filtrados,
                 ciclo=ciclo,   # solo telemetria: permite agregar por ciclo
                 ciclo_id=medidor.ciclo_id,   # solo telemetria: correlacion HTTP
@@ -904,4 +904,3 @@ def signup(form_data: UserCreate, db: Session = Depends(get_db)):
     # bucle moria con NameError en cada ciclo (P0-4). Ademas, dos altas
     # simultaneas podian lanzar dos hilos de trading a la vez.
     return {"mensaje": "Usuario creado correctamente", "usuario_id": nuevo_usuario.id}
-
