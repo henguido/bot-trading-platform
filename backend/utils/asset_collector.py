@@ -24,7 +24,7 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
     m = medidor if medidor is not None else MEDIDOR_NULO
     op_info = m.operacion("binance", "exchange_info")
     op_saldos = m.operacion("binance", "account_balance")
-    account_info = None
+
     try:
         binance.init_client()
         observador = binance.observador_http()
@@ -32,7 +32,18 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
             exchange_info = binance.client.get_exchange_info()
         symbols_info = exchange_info.get("symbols", [])
         anotar_elementos(op_info, len(symbols_info))
+    except Exception as e:
+        print(f"❌ Error al inicializar Binance o traer exchange info: {e}")
+        import traceback
+        traceback.print_exc()
+        if incluir_costes_cuenta:
+            return [], [], [], {"fee_taker_bps_por_lado": None,
+                                "fuente_fee": "NO_DISPONIBLE"}
+        return [], [], []
 
+    account_info = None
+    balances = []
+    try:
         # Una sola llamada privada. Antes se delegaba a get_account_balance(),
         # que internamente hacía get_account() y descartaba commissionRates.
         # Ahora conservamos el mismo tráfico y aprovechamos ese payload para
@@ -49,15 +60,15 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
             # balances estén en cero. No confundimos "cuenta vacía" con fallo.
             if isinstance(account_info, dict):
                 p.marcar_ok()
-        anotar_elementos(op_saldos, len(balances))
     except Exception as e:
-        print(f"❌ Error al inicializar Binance o traer datos: {e}")
-        import traceback
-        traceback.print_exc()
-        if incluir_costes_cuenta:
-            return [], [], [], {"fee_taker_bps_por_lado": None,
-                                "fuente_fee": "NO_DISPONIBLE"}
-        return [], [], []
+        # Compatibilidad con el comportamiento anterior de get_account_balance:
+        # un fallo privado NO borra el universo público. Sólo deja balances y
+        # fee como desconocidos. En PAPER esto permite seguir analizando sin
+        # depender de que el endpoint de cuenta esté disponible.
+        print(f"❌ Error obteniendo el balance: {e}")
+        account_info = None
+        balances = []
+    anotar_elementos(op_saldos, len(balances))
 
     activos = []
     saldos = {b["asset"]: float(b["free"]) + float(b["locked"]) for b in balances}
