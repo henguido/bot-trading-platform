@@ -7,6 +7,7 @@ proyecto temporal y prueban alli la resolucion basada en __file__.
 """
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 import re
@@ -120,8 +121,20 @@ def test_produccion_no_necesita_archivo_env(tmp_path):
 
 def test_settings_declara_ruta_explicita_y_no_usa_find_dotenv():
     fuente = SETTINGS.read_text(encoding="utf-8")
+    arbol = ast.parse(fuente)
+    llamadas = [
+        n for n in ast.walk(arbol)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "load_dotenv"
+    ]
+
+    assert len(llamadas) == 1
+    llamada = llamadas[0]
+    keywords = {kw.arg: kw.value for kw in llamada.keywords}
+    assert not llamada.args, "la ruta debe nombrarse explicitamente"
+    assert isinstance(keywords.get("dotenv_path"), ast.Name)
+    assert keywords["dotenv_path"].id == "ENV_LOCAL_CANONICO"
+    assert isinstance(keywords.get("override"), ast.Constant)
+    assert keywords["override"].value is False
     assert "ENV_LOCAL_CANONICO" in fuente
-    assert "dotenv_path=ENV_LOCAL_CANONICO" in fuente
-    assert "override=False" in fuente
     assert "find_dotenv" not in fuente
-    assert "load_dotenv()" not in fuente
