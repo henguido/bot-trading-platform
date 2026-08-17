@@ -150,6 +150,41 @@ class BinanceConnector:
         anotar_elementos(op, len(snapshot))
         return snapshot
 
+    def get_market_metrics(self, medicion=None):
+        """
+        Metricas de mercado de TODOS los simbolos con UNA sola peticion REST.
+
+        Fase BOT 2.0-03B. Usa `Client.get_ticker()` sin parametro `symbol`, que
+        es GET /api/v3/ticker/24hr completo. Auditado en real: 3.684 simbolos,
+        ~1,9 MiB, ~400 ms, cobertura 484/484 del universo y cero campos
+        ausentes. Trae en una sola respuesta lastPrice, bidPrice, askPrice,
+        quoteVolume, volume, highPrice, lowPrice, priceChangePercent y count.
+
+        Peso documentado por Binance para la variante sin `symbol`: 80. La
+        libreria no lo expone, asi que no se verifica localmente.
+
+        Devuelve {symbol: fila_cruda}. Si la peticion falla devuelve {}: sin
+        metricas el scanner no puntua nada, que es la direccion segura.
+        """
+        self.init_client()
+        op = medicion if medicion is not None else OPERACION_NULA
+        try:
+            with op.peticion(observador=self.observador_http()):
+                filas = self.client.get_ticker()
+        except Exception as e:
+            print(f"⚠️ No se pudieron obtener las metricas de mercado: "
+                  f"{type(e).__name__}: {e}")
+            return {}
+
+        metricas = {}
+        for f in filas or ():
+            try:
+                metricas[f["symbol"]] = f
+            except (KeyError, TypeError):
+                continue          # fila ilegible: se ignora, no se inventa
+        anotar_elementos(op, len(metricas))
+        return metricas
+
     def get_multiple_prices(self, symbols, snapshot=None, medicion=None):
         """
         Precios de `symbols`, resueltos desde el snapshot batch del ciclo.

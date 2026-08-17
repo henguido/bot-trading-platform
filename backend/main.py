@@ -30,6 +30,7 @@ from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
+from backend import scanner
 from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import construir_cartera
@@ -392,6 +393,12 @@ def trading_loop():
             snapshot_precios = binance.get_price_snapshot(
                 medicion=medidor.operacion("binance", "market_price_snapshot"))
 
+            # Metricas de mercado del ciclo: UNA peticion (ticker/24hr completo)
+            # que alimenta al scanner. Reutilizada para los 484 activos; aqui se
+            # paga una vez y no vuelve a haber trafico (03B).
+            metricas_mercado = binance.get_market_metrics(
+                medicion=medidor.operacion("binance", "market_metrics"))
+
             activos_para_gpt = []
             symbols_a_precio = [a["symbol"] for a in activos_evaluar if a["type"] == "crypto"]
             precios_actuales = binance.get_multiple_prices(
@@ -479,6 +486,22 @@ def trading_loop():
                 })
 
             print(gate.linea(int((time.perf_counter() - inicio_gate) * 1000)))
+
+            # ── SCANNER DETERMINISTICO (Fase BOT 2.0-03B) ────────────────────
+            # Recorta los candidatos de COMPRA NUEVA al Top N por score. No
+            # decide, no dimensiona y no autoriza: solo ordena y recorta. Las
+            # posiciones abiertas se conservan intactas para poder analizar su
+            # salida, igual que en 03A.
+            #
+            # Todas las metricas salen de UNA peticion (ticker/24hr completo),
+            # pedida arriba junto al snapshot de precios. Aqui no hay red.
+            resumen_scanner = scanner.ResumenScanner()
+            inicio_scanner = time.perf_counter()
+            activos_para_gpt = scanner.aplicar(
+                activos_para_gpt, metricas_mercado,
+                top_n=scanner.TOP_N_POR_DEFECTO, resumen=resumen_scanner)
+            print(resumen_scanner.linea(
+                int((time.perf_counter() - inicio_scanner) * 1000), requests=0))
 
             activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))
 

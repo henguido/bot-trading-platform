@@ -42,6 +42,20 @@ AUTH_TOKEN_FALSO = "abcdef0123456789-TOKEN-SINTETICO-NO-REAL"
 API_KEY_FALSA = "sk-CLAVE-SINTETICA-DE-PRUEBA-NO-REAL-000000"
 
 
+def _metricas_sanas(precios):
+    """
+    Metricas de ticker/24hr que pasan todos los filtros duros del scanner (03B).
+
+    Se generan a partir del precio de cada simbolo para que los fixtures del
+    bucle sigan midiendo lo que median antes del scanner.
+    """
+    return {s: {"lastPrice": str(p), "bidPrice": str(p * 0.9995),
+                "askPrice": str(p * 1.0005), "quoteVolume": "1000000",
+                "count": "5000", "highPrice": str(p * 1.05),
+                "lowPrice": str(p), "priceChangePercent": "2.5"}
+            for s, p in precios.items()}
+
+
 class _ClienteConResponse:
     """
     Doble de python-binance: expone la ULTIMA respuesta en `.response`.
@@ -1141,6 +1155,9 @@ def bucle(monkeypatch, bd):
         return {s["symbol"]: 100.0 for s in SIMBOLOS}
 
     monkeypatch.setattr(main.binance, "get_price_snapshot", snapshot_falso)
+    monkeypatch.setattr(main.binance, "get_market_metrics",
+                        lambda medicion=None: _metricas_sanas(
+                            {s["symbol"]: 100.0 for s in SIMBOLOS}))
     monkeypatch.setattr(main.binance, "get_multiple_prices",
                         lambda symbols, snapshot=None, medicion=None: (
                             medicion.elementos(len(symbols)) if medicion else None,
