@@ -1,6 +1,8 @@
 """Evaluacion OOS del estimador por celdas cuantiles (BOT 2.0-04B).
 
 Mide retorno BRUTO. No resta costes, no elige hiperparametros y no toca test.
+Cuando OOD reduce cobertura, reporta por separado el baseline de TODO el
+objetivo y el baseline del subconjunto estimado para no maquillar resultados.
 """
 from __future__ import annotations
 
@@ -35,7 +37,9 @@ class ResumenEvaluacionCeldas:
     n_objetivo: int
     n_estimadas: int
     cobertura: Decimal
-    retorno_real_medio: Optional[Decimal]
+    retorno_real_objetivo_medio: Optional[Decimal]
+    retorno_real_estimadas_medio: Optional[Decimal]
+    sesgo_seleccion_cobertura: Optional[Decimal]
     retorno_predicho_medio: Optional[Decimal]
     mae_prediccion: Optional[Decimal]
     sesgo_prediccion: Optional[Decimal]
@@ -44,7 +48,8 @@ class ResumenEvaluacionCeldas:
     retorno_real_predicho_positivo: Optional[Decimal]
     n_top25: int
     retorno_real_top25_predicho: Optional[Decimal]
-    uplift_top25_vs_baseline: Optional[Decimal]
+    uplift_top25_vs_estimadas: Optional[Decimal]
+    uplift_top25_vs_objetivo: Optional[Decimal]
     radio_p50: Optional[float]
     radio_p95: Optional[float]
     soporte_muestras_p50: Optional[float]
@@ -86,6 +91,8 @@ def evaluar_holdout_celdas(
             continue
         objetivo.append(o)
     objetivo.sort(key=lambda o: (o.estado.timestamp_ms, o.estado.symbol))
+    objetivo_medio = _media(
+        o.etiqueta(modelo.horizonte_horas).retorno_cierre for o in objetivo)
 
     predicciones = []
     for o in objetivo:
@@ -111,19 +118,25 @@ def evaluar_holdout_celdas(
             estado=NO_DISPONIBLE,
             horizonte_horas=modelo.horizonte_horas,
             n_objetivo=n_obj, n_estimadas=0, cobertura=cobertura,
-            retorno_real_medio=None, retorno_predicho_medio=None,
+            retorno_real_objetivo_medio=objetivo_medio,
+            retorno_real_estimadas_medio=None,
+            sesgo_seleccion_cobertura=None,
+            retorno_predicho_medio=None,
             mae_prediccion=None, sesgo_prediccion=None,
             exactitud_direccional=None,
             n_predicho_positivo=0, retorno_real_predicho_positivo=None,
             n_top25=0, retorno_real_top25_predicho=None,
-            uplift_top25_vs_baseline=None,
+            uplift_top25_vs_estimadas=None, uplift_top25_vs_objetivo=None,
             radio_p50=None, radio_p95=None, soporte_muestras_p50=None,
             predicciones=(), motivo="sin_estimaciones_disponibles",
         )
 
     reales = tuple(p.real for p in predicciones)
     predichos = tuple(p.predicho for p in predicciones)
-    baseline = _media(reales)
+    estimadas_medio = _media(reales)
+    sesgo_cobertura = (
+        estimadas_medio - objetivo_medio
+        if estimadas_medio is not None and objetivo_medio is not None else None)
     pred_medio = _media(predichos)
     mae = _media(abs(p.predicho - p.real) for p in predicciones)
     sesgo = _media(p.predicho - p.real for p in predicciones)
@@ -138,13 +151,20 @@ def evaluar_holdout_celdas(
     n_top = max(1, int(math.ceil(n * 0.25)))
     top = ordenadas[:n_top]
     real_top = _media(p.real for p in top)
-    uplift = real_top - baseline if real_top is not None and baseline is not None else None
+    uplift_estimadas = (
+        real_top - estimadas_medio
+        if real_top is not None and estimadas_medio is not None else None)
+    uplift_objetivo = (
+        real_top - objetivo_medio
+        if real_top is not None and objetivo_medio is not None else None)
 
     return ResumenEvaluacionCeldas(
         estado=DISPONIBLE,
         horizonte_horas=modelo.horizonte_horas,
         n_objetivo=n_obj, n_estimadas=n, cobertura=cobertura,
-        retorno_real_medio=baseline,
+        retorno_real_objetivo_medio=objetivo_medio,
+        retorno_real_estimadas_medio=estimadas_medio,
+        sesgo_seleccion_cobertura=sesgo_cobertura,
         retorno_predicho_medio=pred_medio,
         mae_prediccion=mae,
         sesgo_prediccion=sesgo,
@@ -153,7 +173,8 @@ def evaluar_holdout_celdas(
         retorno_real_predicho_positivo=real_positivos,
         n_top25=n_top,
         retorno_real_top25_predicho=real_top,
-        uplift_top25_vs_baseline=uplift,
+        uplift_top25_vs_estimadas=uplift_estimadas,
+        uplift_top25_vs_objetivo=uplift_objetivo,
         radio_p50=_percentil((p.radio_usado for p in predicciones), 0.50),
         radio_p95=_percentil((p.radio_usado for p in predicciones), 0.95),
         soporte_muestras_p50=_percentil(
