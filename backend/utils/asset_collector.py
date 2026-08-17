@@ -1,6 +1,6 @@
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.simulation.simulator import Simulator
-from backend.telemetria_http import MEDIDOR_NULO
+from backend.telemetria_http import MEDIDOR_NULO, anotar_elementos
 
 # Instancias compartidas
 binance = BinanceConnector()
@@ -24,7 +24,7 @@ def get_available_assets(medidor=None):
         with op_info.peticion(observador=observador):
             exchange_info = binance.client.get_exchange_info()
         symbols_info = exchange_info.get("symbols", [])
-        op_info.elementos(len(symbols_info))
+        anotar_elementos(op_info, len(symbols_info))
         # get_account_balance, en cambio, captura la excepcion y devuelve [].
         # Una lista vacia es ambigua (cuenta sin saldo o peticion muerta), asi
         # que sin evidencia positiva no se cuenta como exito.
@@ -33,7 +33,7 @@ def get_available_assets(medidor=None):
             balances = binance.get_account_balance()
             if balances:
                 p.marcar_ok()
-        op_saldos.elementos(len(balances))
+        anotar_elementos(op_saldos, len(balances))
     except Exception as e:
         print(f"❌ Error al inicializar Binance o traer datos: {e}")
         import traceback
@@ -62,26 +62,37 @@ def get_available_assets(medidor=None):
 
     return activos, balances, symbols_info
 
-def get_market_pairs(symbols_info=None, medidor=None):
+def get_market_pairs(symbols_info=None, snapshot=None, medidor=None):
     """
     Devuelve todos los pares activos disponibles con sus precios actuales.
     Estructura: [{"pair": "BTCETH", "price": 13.45}, ...]
 
-    Pide un ticker INDIVIDUAL por par: es el mayor consumidor de peticiones del
-    ciclo. 02A lo cuantifica; 02B lo corrige.
+    Fase BOT 2.0-02B: se construye ENTERAMENTE EN MEMORIA. 02A midio aqui 1.361
+    peticiones -una por par- y 342.594 ms de reloj para que el prompt acabara
+    recibiendo 0 pares. Ahora esta funcion no hace ninguna peticion propia:
+    combina `symbols_info` con el snapshot de precios del ciclo.
+
+    El criterio de que par se considera operable NO cambia: sigue siendo
+    status == TRADING y isSpotTradingAllowed. Lo unico que se anade es que su
+    precio tiene que existir en el snapshot; un par sin precio conocido se
+    omite en lugar de publicarse con un 0.0 inventado.
+
+    `symbols_info` y `snapshot` se piden solo si nadie los aporta, y en ese
+    caso cuesta UNA peticion cada uno, nunca una por par.
     """
     m = medidor if medidor is not None else MEDIDOR_NULO
     op = m.operacion("binance", "get_market_pairs")
-    observador = None
     try:
         binance.init_client()
-        observador = binance.observador_http()
         if symbols_info is None:
             op_info = m.operacion("binance", "exchange_info")
-            with op_info.peticion(observador=observador):
+            with op_info.peticion(observador=binance.observador_http()):
                 exchange_info = binance.client.get_exchange_info()
             symbols_info = exchange_info.get("symbols", [])
-            op_info.elementos(len(symbols_info))
+            anotar_elementos(op_info, len(symbols_info))
+        if snapshot is None:
+            snapshot = binance.get_price_snapshot(
+                medicion=m.operacion("binance", "market_price_snapshot"))
     except Exception as e:
         print(f"❌ Error al obtener exchange info de Binance: {e}")
         return []
@@ -90,19 +101,10 @@ def get_market_pairs(symbols_info=None, medidor=None):
     for s in symbols_info:
         if s.get("status") == "TRADING" and s.get("isSpotTradingAllowed"):
             pair_symbol = s["symbol"]
-            try:
-                # exige_evidencia: get_current_price captura sus excepciones y
-                # devuelve 0.0, asi que la ausencia de excepcion no prueba nada.
-                with op.peticion(observador=observador,
-                                 exige_evidencia=True) as p:
-                    price = float(binance.get_current_price(pair_symbol))
-                    if price:
-                        p.marcar_ok()      # evidencia positiva: llego un precio
-                    else:
-                        p.marcar_error()   # la excepcion se trago dentro
-                pairs.append({"pair": pair_symbol, "price": price})
-            except Exception:
-                continue
+            precio = snapshot.get(pair_symbol)
+            if precio is None:
+                continue          # sin precio conocido no se publica el par
+            pairs.append({"pair": pair_symbol, "price": float(precio)})
 
-    op.elementos(len(pairs))
+    anotar_elementos(op, len(pairs))
     return pairs

@@ -1,6 +1,7 @@
 from binance.client import Client
 from backend.config import settings
-from backend.telemetria_http import OPERACION_NULA, ObservadorRespuesta
+from backend.telemetria_http import (OPERACION_NULA, ObservadorRespuesta,
+                                     anotar_elementos)
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
@@ -106,36 +107,68 @@ class BinanceConnector:
             print(f"❌ Error obteniendo el balance: {e}")
             return []
 
-    def get_multiple_prices(self, symbols, medicion=None):
+    def get_price_snapshot(self, medicion=None):
         """
-        Retorna un diccionario con los precios actuales para los símbolos dados.
+        Foto de precios de TODOS los simbolos con UNA sola peticion REST.
 
-        NO es batch: hace una peticion por simbolo. Eso es exactamente lo que
-        02A esta aqui para cuantificar; corregirlo es trabajo de 02B.
+        Fase BOT 2.0-02B. Sustituye el patron N+1 que 02A midio empiricamente:
+        484 + 1.361 tickers individuales por ciclo, 468 s de reloj.
 
-        `medicion` es un acumulador de telemetria opcional (fase 02A). Cuando
-        no se pasa, se usa un objeto nulo: no hay ninguna rama distinta de
-        ejecucion segun se este midiendo o no.
+        Usa `Client.get_all_tickers()` de python-binance 1.0.28, que es
+        GET /api/v3/ticker/price SIN parametro `symbol` -el mismo endpoint que
+        ya usaba `get_symbol_ticker`, solo que sin filtrar-. No se construye
+        ninguna peticion HTTP a mano: la libreria instalada ya lo ofrece.
+
+        Devuelve {symbol: precio}. Un simbolo AUSENTE de la respuesta queda
+        AUSENTE del diccionario: ausente significa desconocido, y desconocido
+        no es 0.0. Un precio que el propio exchange informa como 0 si se
+        conserva tal cual, porque eso es un dato, no una laguna.
+
+        Si la peticion falla se devuelve {} -nunca un snapshot a medias ni el
+        del ciclo anterior-, para que ningun consumidor pueda confundir "no lo
+        se" con "vale cero".
+        """
+        self.init_client()
+        op = medicion if medicion is not None else OPERACION_NULA
+        try:
+            with op.peticion(observador=self.observador_http()):
+                tickers = self.client.get_all_tickers()
+        except Exception as e:
+            # get_all_tickers SI propaga (BinanceAPIException,
+            # BinanceRequestException, TypeError), asi que la peticion queda
+            # anotada como error con su codigo real antes de llegar aqui.
+            print(f"⚠️ No se pudo obtener el snapshot de precios: "
+                  f"{type(e).__name__}: {e}")
+            return {}
+
+        snapshot = {}
+        for t in tickers or ():
+            try:
+                snapshot[t["symbol"]] = float(t["price"])
+            except (KeyError, TypeError, ValueError):
+                continue          # un ticker ilegible se ignora, no se inventa
+        anotar_elementos(op, len(snapshot))
+        return snapshot
+
+    def get_multiple_prices(self, symbols, snapshot=None, medicion=None):
+        """
+        Precios de `symbols`, resueltos desde el snapshot batch del ciclo.
+
+        El contrato externo no cambia: entra una coleccion de simbolos, sale
+        {symbol: precio}. Lo que cambia es el coste. 02A midio 484 peticiones
+        aqui; ahora son CERO cuando el ciclo aporta su snapshot, y como maximo
+        UNA si nadie lo aporto.
+
+        Ya no existe camino por simbolo: no hay N+1 al que poder regresar.
+
+        Un simbolo ausente del snapshot NO aparece en la salida. Aguas abajo
+        `precios.get(symbol)` devuelve None y el activo se omite, exactamente
+        igual que antes ocurria con el 0.0 que dejaba un ticker fallido.
         """
         op = medicion if medicion is not None else OPERACION_NULA
-        observador = self.observador_http()
-        prices = {}
-        for symbol in symbols:
-            try:
-                # exige_evidencia: get_current_price captura sus excepciones y
-                # devuelve 0.0, asi que aqui la ausencia de excepcion no prueba
-                # nada. El veredicto se da explicitamente.
-                with op.peticion(observador=observador,
-                                 exige_evidencia=True) as p:
-                    precio = float(self.get_current_price(symbol))
-                    if precio:
-                        p.marcar_ok()      # evidencia positiva: llego un precio
-                    else:
-                        p.marcar_error()   # la excepcion se trago dentro
-                    prices[symbol] = precio
-            except Exception as e:
-                print(f"⚠️ No se pudo obtener precio para {symbol}: {e}")
-        # "Precios obtenidos": los realmente utilizables. Un 0.0 esta en el
-        # diccionario pero no es un precio.
-        op.elementos(sum(1 for v in prices.values() if v))
+        if snapshot is None:
+            # Nadie aporto snapshot: se pide UNO, jamas uno por simbolo.
+            snapshot = self.get_price_snapshot(medicion=medicion)
+        prices = {s: snapshot[s] for s in symbols if s in snapshot}
+        anotar_elementos(op, len(prices))
         return prices

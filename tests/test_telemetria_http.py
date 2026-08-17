@@ -287,10 +287,11 @@ def test_atribucion_4b_si_hay_respuesta_nueva_si_se_atribuye():
 
 def test_atribucion_5_metodo_legacy_que_traga_la_excepcion(monkeypatch):
     """
-    get_current_price captura la excepcion y devuelve 0.0.
+    `get_price_snapshot` captura la excepcion del batch y devuelve {}.
 
-    Sin evidencia positiva la peticion NO puede contarse como exito, y sin
-    respuesta nueva el codigo es desconocido, jamas el anterior.
+    La peticion ya quedo anotada como error con su codigo REAL antes de que el
+    metodo se la tragase, porque `get_all_tickers` si propaga. El codigo no
+    puede ser el de una peticion anterior.
     """
     from backend.connectors.crypto import binance_connector as bc
 
@@ -299,22 +300,25 @@ def test_atribucion_5_metodo_legacy_que_traga_la_excepcion(monkeypatch):
     monkeypatch.setattr(conector, "init_client", lambda: None)
     monkeypatch.setattr(conector, "client", cliente, raising=False)
 
-    def precio_falso(symbol):
-        if symbol == "BTCUSDT":
-            cliente.responde(200)
-            return 100000.0
-        return 0.0            # fallo tragado: NO toca cliente.response
-
-    monkeypatch.setattr(conector, "get_current_price", precio_falso)
-
     m = MedidorCicloHttp()
-    op = m.operacion("binance", "get_multiple_prices")
-    salida = conector.get_multiple_prices(["BTCUSDT", "MUERTOUSDT"], medicion=op)
 
-    assert salida == {"BTCUSDT": 100000.0, "MUERTOUSDT": 0.0}, \
-        "medir no cambia lo que devuelve"
+    # 1) Peticion buena: 200 real.
+    cliente.get_all_tickers = lambda: (cliente.responde(200),
+                                       [{"symbol": "BTCUSDT", "price": "100000.0"}])[1]
+    op = m.operacion("binance", "market_price_snapshot")
+    assert conector.get_price_snapshot(medicion=op) == {"BTCUSDT": 100000.0}
+
+    # 2) Peticion que muere ANTES de producir respuesta nueva.
+    def revienta():
+        raise ConnectionError("la conexion murio antes de responder")
+
+    cliente.get_all_tickers = revienta
+    assert conector.get_price_snapshot(medicion=op) == {}, \
+        "un batch fallido devuelve vacio, nunca datos a medias"
+
     assert (op.metricas.n_ok, op.metricas.n_error) == (1, 1)
-    assert op.metricas.status_counts == {"200": 1, SIN_STATUS: 1}
+    assert op.metricas.status_counts == {"200": 1, SIN_STATUS: 1}, \
+        "el fallo no puede heredar el 200 de la peticion anterior"
 
 
 def test_atribucion_5b_get_account_balance_vacio_sin_respuesta_no_es_exito(
@@ -647,27 +651,27 @@ def test_n_elementos_de_exchange_info_y_account_balance(monkeypatch):
     assert balances == saldos and info == simbolos
 
 
-def test_n_elementos_de_get_multiple_prices_cuenta_precios_utiles(monkeypatch):
+def test_n_elementos_de_get_multiple_prices_cuenta_precios_devueltos(monkeypatch):
+    """02B: se resuelve del snapshot, con CERO peticiones propias."""
     from backend.connectors.crypto import binance_connector as bc
 
     conector = bc.BinanceConnector()
-    precios = {"BTCUSDT": 100000.0, "ETHUSDT": 3000.0, "XXXUSDT": 0.0}
     monkeypatch.setattr(conector, "init_client", lambda: None)
-    monkeypatch.setattr(conector, "get_current_price", lambda s: precios[s])
-    monkeypatch.setattr(conector, "ultima_respuesta",
-                        lambda: SimpleNamespace(status_code=200))
+    snapshot = {"BTCUSDT": 100000.0, "ETHUSDT": 3000.0}
 
     m = MedidorCicloHttp()
     op = m.operacion("binance", "get_multiple_prices")
-    salida = conector.get_multiple_prices(list(precios), medicion=op)
+    salida = conector.get_multiple_prices(
+        ["BTCUSDT", "ETHUSDT", "AUSENTEUSDT"], snapshot=snapshot, medicion=op)
 
-    assert salida == precios, "medir no cambia lo que devuelve"
-    assert op.metricas.n_requests == 3, "una peticion por simbolo: NO es batch"
-    assert op.metricas.n_elementos == 2, "un 0.0 esta en el dict pero no es un precio"
-    assert op.metricas.n_ok == 2 and op.metricas.n_error == 1
+    assert salida == snapshot, "solo los simbolos con precio conocido"
+    assert "AUSENTEUSDT" not in salida, "un simbolo ausente no inventa 0.0"
+    assert op.metricas.n_requests == 0, "resolver del snapshot no es HTTP"
+    assert op.metricas.n_elementos == 2
 
 
 def test_n_elementos_de_get_market_pairs_cuenta_pares_con_precio(monkeypatch):
+    """02B: se construye en memoria, con CERO peticiones propias."""
     from backend.utils import asset_collector as ac
 
     simbolos = [
@@ -676,16 +680,14 @@ def test_n_elementos_de_get_market_pairs_cuenta_pares_con_precio(monkeypatch):
         {"symbol": "VIEJOX", "status": "BREAK", "isSpotTradingAllowed": True},
     ]
     monkeypatch.setattr(ac.binance, "init_client", lambda: None)
-    monkeypatch.setattr(ac.binance, "get_current_price", lambda s: 1.5)
-    monkeypatch.setattr(ac.binance, "ultima_respuesta",
-                        lambda: SimpleNamespace(status_code=200), raising=False)
 
     m = MedidorCicloHttp()
-    pares = ac.get_market_pairs(simbolos, medidor=m)
+    pares = ac.get_market_pairs(simbolos, snapshot={"BTCUSDT": 1.5, "ETHBTC": 0.05},
+                                medidor=m)
 
     op = m.operacion("binance", "get_market_pairs")
     assert len(pares) == 2, "el par que no cotiza se descarta"
-    assert op.metricas.n_requests == 2, "un ticker individual por par"
+    assert op.metricas.n_requests == 0, "ya no hay un ticker por par"
     assert op.metricas.n_elementos == 2
 
 
@@ -1124,10 +1126,20 @@ def bucle(monkeypatch, bd):
                         raising=False)
     monkeypatch.setattr(main.binance, "ultima_respuesta",
                         lambda: SimpleNamespace(status_code=200))
+    # 02B: el ciclo pide UN snapshot y lo reutiliza; get_multiple_prices ya no
+    # hace peticiones propias.
+    def snapshot_falso(medicion=None):
+        if medicion is not None:
+            with medicion.peticion() as p:
+                p.anotar_status(200)
+            medicion.elementos(len(SIMBOLOS))
+        return {s["symbol"]: 100.0 for s in SIMBOLOS}
+
+    monkeypatch.setattr(main.binance, "get_price_snapshot", snapshot_falso)
     monkeypatch.setattr(main.binance, "get_multiple_prices",
-                        lambda symbols, medicion=None: (
+                        lambda symbols, snapshot=None, medicion=None: (
                             medicion.elementos(len(symbols)) if medicion else None,
-                            {s: 100.0 for s in symbols})[1])
+                            {s: (snapshot or {}).get(s, 100.0) for s in symbols})[1])
     monkeypatch.setattr(main.news_connector, "obtener_noticias_combinadas",
                         lambda total=6, medidor=None: ["n1", "n2"])
     def assets_falsos(medidor=None):
@@ -1150,7 +1162,7 @@ def bucle(monkeypatch, bd):
 
     monkeypatch.setattr(main, "get_available_assets", assets_falsos)
     monkeypatch.setattr(main, "get_market_pairs",
-                        lambda symbols_info=None, medidor=None: [])
+                        lambda symbols_info=None, snapshot=None, medidor=None: [])
     monkeypatch.setattr(main, "mercado_ny_abierto", lambda: False)
     monkeypatch.setattr(main, "precio_medio_de", lambda estado, symbol: None)
     monkeypatch.setattr(main, "construir_cartera",

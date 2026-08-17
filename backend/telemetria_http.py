@@ -194,6 +194,23 @@ class ObservadorRespuesta:
             return None
 
 
+def anotar_elementos(op, n) -> None:
+    """
+    Anota `n_elementos` garantizando el contrato fail-open en el LADO DEL
+    LLAMADOR.
+
+    `OperacionHttp.elementos` ya no propaga, pero los puntos de medicion
+    aceptan cualquier objeto con esa interfaz -un doble de prueba, un medidor
+    futuro-. Sin esto, una anotacion que lanzase podria cambiar el resultado
+    funcional de quien esta midiendo, que es exactamente lo que la telemetria
+    no puede hacer.
+    """
+    try:
+        op.elementos(n)
+    except Exception:
+        pass
+
+
 def _preparar_observador(observador) -> None:
     try:
         if observador is not None:

@@ -245,9 +245,10 @@ def trading_loop():
     EVALUAR_CADA_N_CICLOS = 2  # Puedes ajustar este valor
     noticias_cache = None
     timestamp_cache = None
-    # Los filtros del exchange se piden de forma perezosa: si todavia no hay
-    # usuario no hace falta contactar con Binance.
-    filters_dict = None
+    # `filters_dict` ya NO se cachea entre ciclos: se deriva en cada iteracion
+    # del mismo exchange_info que trae get_available_assets, sin coste HTTP
+    # adicional (02B). Antes se pedia aparte -02A midio 2 exchange_info en el
+    # primer ciclo- y luego quedaba congelado para toda la vida del proceso.
 
     while True:
         # ── Telemetria HTTP del ciclo (Fase BOT 2.0-02A) ─────────────────────
@@ -276,18 +277,6 @@ def trading_loop():
             # estado.ordenes_pendientes > 0.
             if settings.MODO_REAL:
                 reconciliar_pendientes(real_trader, usuario_id=contexto.usuario_id)
-
-            if filters_dict is None:
-                binance.init_client()
-                # Solo el PRIMER ciclo pide exchange_info aqui; despues
-                # filters_dict vive en memoria. get_available_assets(), en
-                # cambio, lo vuelve a pedir en CADA ciclo. Eliminar esa segunda
-                # peticion es trabajo de 02B, no de 02A.
-                op_info = medidor.operacion("binance", "exchange_info")
-                with op_info.peticion(observador=binance.observador_http()):
-                    exchange_info = binance.client.get_exchange_info()
-                op_info.elementos(len(exchange_info.get("symbols", [])))
-                filters_dict = {s["symbol"]: s["filters"] for s in exchange_info["symbols"]}
 
             ahora = datetime.now()
             minuto_actual = ahora.minute
@@ -323,6 +312,12 @@ def trading_loop():
                 time.sleep(settings.WAIT_TIME)
                 ciclo += 1
                 continue
+
+            # Los filtros salen del MISMO exchange_info que acaba de traer
+            # get_available_assets: cero peticiones extra, y ademas se
+            # refrescan cada ciclo en lugar de quedar congelados en el arranque
+            # del proceso (02B). Aqui es la unica vez que se construyen.
+            filters_dict = {s["symbol"]: s["filters"] for s in symbols_info}
 
             print("🔢 Total activos disponibles:", len(assets_disponibles))
             for a in assets_disponibles[:10]:
@@ -369,10 +364,22 @@ def trading_loop():
             )
             print(f"[CARTERA] modo={cartera.modo} capital={cartera.capital_disponible():.2f} USDT")
 
+            # ── UN SOLO SNAPSHOT DE PRECIOS POR CICLO (02B) ──────────────────
+            # Una peticion REST para todos los simbolos del exchange, reutilizada
+            # por get_multiple_prices y por get_market_pairs. 02A midio 484 +
+            # 1.361 tickers individuales haciendo exactamente este trabajo.
+            #
+            # Efecto lateral deseado: el snapshot es temporalmente COHERENTE
+            # -todos los precios del mismo instante- en vez de 1.845 precios
+            # tomados a lo largo de 7,8 minutos.
+            snapshot_precios = binance.get_price_snapshot(
+                medicion=medidor.operacion("binance", "market_price_snapshot"))
+
             activos_para_gpt = []
             symbols_a_precio = [a["symbol"] for a in activos_evaluar if a["type"] == "crypto"]
             precios_actuales = binance.get_multiple_prices(
                 symbols_a_precio,
+                snapshot=snapshot_precios,
                 medicion=medidor.operacion("binance", "get_multiple_prices"))
 
             for asset in activos_evaluar:
@@ -434,7 +441,10 @@ def trading_loop():
                 if float(b["free"]) + float(b["locked"]) > 0
             ]
 
-            market_pairs = get_market_pairs(symbols_info, medidor=medidor)
+            # Mismo snapshot, cero peticiones: se construye en memoria (02B).
+            market_pairs = get_market_pairs(symbols_info,
+                                            snapshot=snapshot_precios,
+                                            medidor=medidor)
             usdt_disponible = next((b["cantidad"] for b in portafolio_real if b["moneda"] == "USDT"), 0.0)
 
             # Enviar a análisis
