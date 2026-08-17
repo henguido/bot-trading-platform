@@ -101,7 +101,8 @@ def test_celda_exacta_se_prefiere_si_tiene_soporte():
     m = ajustar_modelo_celdas(
         datos, horizonte_horas=4, n_bins=2, min_muestras=2,
         min_symbols=2, min_timestamps=2, max_radio=1)
-    q = estado(qv=115, trades=11, rango=.011, momentum=-1.7)
+    # Esta consulta cae deliberadamente en la misma celda cuantílica de A/B.
+    q = estado(qv=105, trades=10, rango=.0105, momentum=-1.9)
     e = estimar_edge_celdas(m, q)
     assert e.estado == DISPONIBLE
     assert e.radio_usado == 0
