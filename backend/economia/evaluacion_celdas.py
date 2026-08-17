@@ -3,11 +3,18 @@
 Mide retorno BRUTO. No resta costes, no elige hiperparametros y no toca test.
 Cuando OOD reduce cobertura, reporta por separado el baseline de TODO el
 objetivo y el baseline del subconjunto estimado para no maquillar resultados.
+
+Ademas mide ranking CROSS-SECTIONAL por timestamp. Un Top25 global puede parecer
+bueno solo porque el modelo asigna edge alto durante un regimen alcista; el bot,
+en cambio, compara activos que existen al mismo tiempo. Por eso tambien medimos
+si dentro de cada timestamp los activos con mayor edge realizan mejor retorno.
 """
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional, Tuple
 
@@ -16,6 +23,7 @@ from backend.economia.edge_historico import ObservacionEdge
 
 DISPONIBLE = "DISPONIBLE"
 NO_DISPONIBLE = "NO_DISPONIBLE"
+MIN_ACTIVOS_CROSS_SECTION = 4
 
 
 @dataclass(frozen=True)
@@ -28,6 +36,8 @@ class PrediccionCeldas:
     n_muestras_soporte: int
     n_symbols_soporte: int
     n_timestamps_soporte: int
+    max_symbol_share: Decimal
+    max_timestamp_share: Decimal
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,19 @@ class ResumenEvaluacionCeldas:
     radio_p50: Optional[float]
     radio_p95: Optional[float]
     soporte_muestras_p50: Optional[float]
+    max_symbol_share_p95: Optional[float]
+    max_timestamp_share_p95: Optional[float]
+    n_timestamps_cross_section: int
+    n_timestamps_cross_section_excluidos: int
+    retorno_cross_section_baseline_medio: Optional[Decimal]
+    retorno_cross_section_top25_medio: Optional[Decimal]
+    uplift_cross_section_medio: Optional[Decimal]
+    fraccion_timestamps_uplift_positivo: Optional[Decimal]
+    n_meses_cross_section: int
+    meses_uplift_positivo: int
+    uplift_mensual_min: Optional[Decimal]
+    uplift_mensual_p25: Optional[Decimal]
+    uplift_mensual_p50: Optional[Decimal]
     predicciones: Tuple[PrediccionCeldas, ...]
     motivo: Optional[str] = None
 
@@ -75,8 +98,69 @@ def _percentil(valores, q: float) -> Optional[float]:
     return v[lo] + (v[hi] - v[lo]) * f
 
 
+def _percentil_decimal(valores, q: float) -> Optional[Decimal]:
+    v = tuple(sorted(Decimal(x) for x in valores))
+    if not v:
+        return None
+    if len(v) == 1:
+        return v[0]
+    pos = Decimal(str(q)) * Decimal(len(v) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(v) - 1)
+    f = pos - Decimal(lo)
+    return v[lo] + (v[hi] - v[lo]) * f
+
+
 def _signo(x: Decimal) -> int:
     return 1 if x > 0 else (-1 if x < 0 else 0)
+
+
+def _resumen_cross_section(predicciones: Tuple[PrediccionCeldas, ...]):
+    por_timestamp = defaultdict(list)
+    for p in predicciones:
+        por_timestamp[p.timestamp_ms].append(p)
+
+    baselines = []
+    tops = []
+    uplifts = []
+    excluidos = 0
+    uplift_por_mes = defaultdict(list)
+
+    for ts in sorted(por_timestamp):
+        grupo = por_timestamp[ts]
+        if len(grupo) < MIN_ACTIVOS_CROSS_SECTION:
+            excluidos += 1
+            continue
+        baseline = _media(p.real for p in grupo)
+        ordenadas = sorted(grupo, key=lambda p: (-p.predicho, p.symbol))
+        n_top = max(1, int(math.ceil(len(ordenadas) * 0.25)))
+        top = _media(p.real for p in ordenadas[:n_top])
+        uplift = top - baseline
+        baselines.append(baseline)
+        tops.append(top)
+        uplifts.append(uplift)
+        mes = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m")
+        uplift_por_mes[mes].append(uplift)
+
+    mensuales = tuple(
+        _media(uplift_por_mes[mes]) for mes in sorted(uplift_por_mes)
+    )
+    mensuales = tuple(x for x in mensuales if x is not None)
+    return {
+        "n": len(uplifts),
+        "excluidos": excluidos,
+        "baseline": _media(baselines),
+        "top": _media(tops),
+        "uplift": _media(uplifts),
+        "fraccion_positivo": (
+            Decimal(sum(x > 0 for x in uplifts)) / Decimal(len(uplifts))
+            if uplifts else None),
+        "n_meses": len(mensuales),
+        "meses_positivos": sum(x > 0 for x in mensuales),
+        "mensual_min": min(mensuales) if mensuales else None,
+        "mensual_p25": _percentil_decimal(mensuales, 0.25),
+        "mensual_p50": _percentil_decimal(mensuales, 0.50),
+    }
 
 
 def evaluar_holdout_celdas(
@@ -108,6 +192,8 @@ def evaluar_holdout_celdas(
             n_muestras_soporte=e.n_muestras,
             n_symbols_soporte=e.n_symbols_unicos,
             n_timestamps_soporte=e.n_timestamps_unicos,
+            max_symbol_share=e.max_symbol_share,
+            max_timestamp_share=e.max_timestamp_share,
         ))
 
     n_obj = len(objetivo)
@@ -128,6 +214,15 @@ def evaluar_holdout_celdas(
             n_top25=0, retorno_real_top25_predicho=None,
             uplift_top25_vs_estimadas=None, uplift_top25_vs_objetivo=None,
             radio_p50=None, radio_p95=None, soporte_muestras_p50=None,
+            max_symbol_share_p95=None, max_timestamp_share_p95=None,
+            n_timestamps_cross_section=0, n_timestamps_cross_section_excluidos=0,
+            retorno_cross_section_baseline_medio=None,
+            retorno_cross_section_top25_medio=None,
+            uplift_cross_section_medio=None,
+            fraccion_timestamps_uplift_positivo=None,
+            n_meses_cross_section=0, meses_uplift_positivo=0,
+            uplift_mensual_min=None, uplift_mensual_p25=None,
+            uplift_mensual_p50=None,
             predicciones=(), motivo="sin_estimaciones_disponibles",
         )
 
@@ -157,6 +252,7 @@ def evaluar_holdout_celdas(
     uplift_objetivo = (
         real_top - objetivo_medio
         if real_top is not None and objetivo_medio is not None else None)
+    cs = _resumen_cross_section(tuple(predicciones))
 
     return ResumenEvaluacionCeldas(
         estado=DISPONIBLE,
@@ -179,6 +275,21 @@ def evaluar_holdout_celdas(
         radio_p95=_percentil((p.radio_usado for p in predicciones), 0.95),
         soporte_muestras_p50=_percentil(
             (p.n_muestras_soporte for p in predicciones), 0.50),
+        max_symbol_share_p95=_percentil(
+            (p.max_symbol_share for p in predicciones), 0.95),
+        max_timestamp_share_p95=_percentil(
+            (p.max_timestamp_share for p in predicciones), 0.95),
+        n_timestamps_cross_section=cs["n"],
+        n_timestamps_cross_section_excluidos=cs["excluidos"],
+        retorno_cross_section_baseline_medio=cs["baseline"],
+        retorno_cross_section_top25_medio=cs["top"],
+        uplift_cross_section_medio=cs["uplift"],
+        fraccion_timestamps_uplift_positivo=cs["fraccion_positivo"],
+        n_meses_cross_section=cs["n_meses"],
+        meses_uplift_positivo=cs["meses_positivos"],
+        uplift_mensual_min=cs["mensual_min"],
+        uplift_mensual_p25=cs["mensual_p25"],
+        uplift_mensual_p50=cs["mensual_p50"],
         predicciones=tuple(predicciones),
         motivo=None,
     )
