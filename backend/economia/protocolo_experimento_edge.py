@@ -9,6 +9,11 @@ edge robusto aqui, no se escala a cientos de simbolos.
 
 TEST 2026 queda bloqueado: solo se abre despues de escoger una configuracion
 usando exclusivamente train + validacion 2025.
+
+RESOLUCION: 4h. Los cuatro horizontes experimentales (4/8/12/24h) son multiplos
+exactos de 4h y el estado de 24h usa seis velas. Frente a 1h reduce ~75% del
+volumen de datos/observaciones sin perder ninguno de los puntos temporales que
+entran en la rejilla de evaluacion. No se cambia despues de ver resultados.
 """
 from __future__ import annotations
 
@@ -32,6 +37,10 @@ UNIVERSO_FALSACION: Tuple[str, ...] = (
     "TRXUSDT", "ETCUSDT", "XLMUSDT", "DOTUSDT", "ATOMUSDT",
     "AVAXUSDT", "UNIUSDT", "AAVEUSDT", "FILUSDT", "NEARUSDT",
 )
+
+INTERVALO_KLINE = "4h"
+INTERVALO_HORAS = 4
+VENTANA_ESTADO_HORAS = 24
 
 # Descarga solicitada. Un simbolo listado despues simplemente tendra menor
 # cobertura y quedara explicitado por dataset_edge; no se rellena hacia atras.
