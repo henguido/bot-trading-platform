@@ -133,9 +133,11 @@ def _validar_parametros(intervalo_horas: int, ventana_horas: int,
     if ventana_horas % intervalo_horas:
         raise ValueError("ventana_horas debe ser multiplo del intervalo")
 
-    hs = tuple(int(h) for h in horizontes_horas)
-    if not hs or len(set(hs)) != len(hs) or any(h <= 0 or h % intervalo_horas for h in hs):
-        raise ValueError("horizontes deben ser positivos, unicos y multiplos del intervalo")
+    hs = tuple(horizontes_horas)
+    if (not hs or any(isinstance(h, bool) or not isinstance(h, int) for h in hs)
+            or len(set(hs)) != len(hs)
+            or any(h <= 0 or h % intervalo_horas for h in hs)):
+        raise ValueError("horizontes deben ser enteros positivos, unicos y multiplos del intervalo")
     return ventana_horas // intervalo_horas, tuple(sorted(hs))
 
 
