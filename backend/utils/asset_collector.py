@@ -1,44 +1,75 @@
 from backend.connectors.crypto.binance_connector import BinanceConnector
+from backend.economia.fuentes import extraer_taker_bps
 from backend.simulation.simulator import Simulator
-from backend.telemetria_http import MEDIDOR_NULO, anotar_elementos
+from backend.telemetria_http import (MEDIDOR_NULO, anotar_elementos,
+                                     describir_error)
 
 # Instancias compartidas
 binance = BinanceConnector()
 simulator = Simulator()
 
-def get_available_assets(medidor=None):
-    """
-    Devuelve una lista de activos (cripto) operables contra USDT que estén activos y permitidos en spot.
-    También retorna los balances y symbols_info para evitar consultas duplicadas.
 
-    `medidor` es telemetria opcional (fase 02A). Cuando no se pasa se usa un
-    medidor nulo: no cambia ninguna rama de ejecucion.
+def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
+    """
+    Devuelve activos crypto/USDT operables, balances y symbols_info.
+
+    04A-1: si `incluir_costes_cuenta=True`, devuelve además un cuarto elemento
+    con la fee taker observada en EL MISMO GET /api/v3/account que ya se hacía
+    para balances. No añade ninguna petición.
+
+    El modo por defecto conserva exactamente la firma histórica de 3 elementos,
+    para no romper consumidores ajenos a 04A.
+
+    `medidor` es telemetria opcional. Cuando no se pasa se usa un medidor nulo.
     """
     m = medidor if medidor is not None else MEDIDOR_NULO
     op_info = m.operacion("binance", "exchange_info")
     op_saldos = m.operacion("binance", "account_balance")
+
     try:
         binance.init_client()
         observador = binance.observador_http()
-        # get_exchange_info SI propaga sus fallos: no hace falta evidencia.
         with op_info.peticion(observador=observador):
             exchange_info = binance.client.get_exchange_info()
         symbols_info = exchange_info.get("symbols", [])
         anotar_elementos(op_info, len(symbols_info))
-        # get_account_balance, en cambio, captura la excepcion y devuelve [].
-        # Una lista vacia es ambigua (cuenta sin saldo o peticion muerta), asi
-        # que sin evidencia positiva no se cuenta como exito.
+    except Exception as e:
+        print(f"❌ Error al inicializar Binance o traer exchange info: {describir_error(e)}")
+        if incluir_costes_cuenta:
+            return [], [], [], {"fee_taker_bps_por_lado": None,
+                                "fuente_fee": "NO_DISPONIBLE"}
+        return [], [], []
+
+    account_info = None
+    balances = []
+    try:
+        # Una sola llamada privada. Antes se delegaba a get_account_balance(),
+        # que internamente hacía get_account() y descartaba commissionRates.
+        # Ahora conservamos el mismo tráfico y aprovechamos ese payload para
+        # extraer la fee taker. Fallo/ausencia => fee desconocida, nunca cero.
         with op_saldos.peticion(observador=observador,
                                 exige_evidencia=True) as p:
-            balances = binance.get_account_balance()
-            if balances:
+            account_info = binance.client.get_account()
+            balances_crudos = account_info.get("balances", []) if isinstance(account_info, dict) else []
+            balances = [
+                b for b in balances_crudos
+                if float(b.get("free", 0) or 0) > 0 or float(b.get("locked", 0) or 0) > 0
+            ]
+            # La respuesta de cuenta es evidencia positiva aunque todos los
+            # balances estén en cero. No confundimos "cuenta vacía" con fallo.
+            if isinstance(account_info, dict):
                 p.marcar_ok()
-        anotar_elementos(op_saldos, len(balances))
     except Exception as e:
-        print(f"❌ Error al inicializar Binance o traer datos: {e}")
-        import traceback
-        traceback.print_exc()
-        return [], [], []
+        # Compatibilidad con el comportamiento anterior de get_account_balance:
+        # un fallo privado NO borra el universo público. Sólo deja balances y
+        # fee como desconocidos. En PAPER esto permite seguir analizando sin
+        # depender de que el endpoint de cuenta esté disponible.
+        # Se sanea porque una excepción de endpoint firmado puede incluir URL,
+        # timestamp o signature en su representación.
+        print(f"❌ Error obteniendo el balance: {describir_error(e)}")
+        account_info = None
+        balances = []
+    anotar_elementos(op_saldos, len(balances))
 
     activos = []
     saldos = {b["asset"]: float(b["free"]) + float(b["locked"]) for b in balances}
@@ -60,7 +91,15 @@ def get_available_assets(medidor=None):
                 "has_position": symbol in simulator.positions and simulator.positions[symbol].quantity > 0
             })
 
+    if incluir_costes_cuenta:
+        fee = extraer_taker_bps(account_info)
+        return activos, balances, symbols_info, {
+            "fee_taker_bps_por_lado": float(fee) if fee is not None else None,
+            "fuente_fee": ("binance_account.commissionRates.taker"
+                           if fee is not None else "NO_DISPONIBLE"),
+        }
     return activos, balances, symbols_info
+
 
 def get_market_pairs(symbols_info=None, snapshot=None, medidor=None):
     """
@@ -94,7 +133,7 @@ def get_market_pairs(symbols_info=None, snapshot=None, medidor=None):
             snapshot = binance.get_price_snapshot(
                 medicion=m.operacion("binance", "market_price_snapshot"))
     except Exception as e:
-        print(f"❌ Error al obtener exchange info de Binance: {e}")
+        print(f"❌ Error al obtener exchange info de Binance: {describir_error(e)}")
         return []
 
     pairs = []
