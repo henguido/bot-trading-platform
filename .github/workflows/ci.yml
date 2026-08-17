@@ -18,6 +18,7 @@ env:
   TRADING_MODE: PAPER
   ALLOW_LIVE_TRADING: ""
   INITIAL_CAPITAL_USD: "500"
+  LIMITE_ASIGNACION_POR_OPERACION: "0.02"
   SECRET_KEY: ci-only-synthetic-secret-key-bot-trading-2026
 
 jobs:
