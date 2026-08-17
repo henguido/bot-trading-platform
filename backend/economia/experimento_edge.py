@@ -10,7 +10,7 @@ forma explicita cualquier observacion >= CORTE_TEST_MS antes de evaluar.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Iterable, Optional, Sequence, Tuple
 
@@ -31,8 +31,12 @@ from backend.economia.protocolo_experimento_edge import (
     FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA,
     INTERVALO_HORAS,
     INTERVALO_KLINE,
+    MAX_RADIOS_CANDIDATOS,
     MESES_CROSS_SECTION_MINIMOS,
     MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS,
+    MIN_DIMENSIONES_VECINAS_ROBUSTAS,
+    MIN_MUESTRAS_CANDIDATAS,
+    N_BINS_CANDIDATOS,
     SURVIVORSHIP_PENDIENTE,
     UNIVERSO_FALSACION,
     UNIVERSO_FUENTE,
@@ -91,6 +95,8 @@ class ResultadoConfiguracionFalsacion:
     folds_cross_section_positivos: int
     supera_criterios_minimos: bool
     motivos_rechazo: Tuple[str, ...]
+    robusta_grid: bool = False
+    dimensiones_vecinas_robustas: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -102,6 +108,17 @@ class ResultadoValidacionFalsacion:
     @property
     def n_superan_minimos(self) -> int:
         return sum(r.supera_criterios_minimos for r in self.resultados)
+
+    @property
+    def n_robustas_grid(self) -> int:
+        return sum(r.robusta_grid for r in self.resultados)
+
+    @property
+    def horizontes_robustos(self) -> Tuple[int, ...]:
+        return tuple(sorted({
+            r.configuracion.horizonte_horas
+            for r in self.resultados if r.robusta_grid
+        }))
 
 
 def preparar_dataset_falsacion(
@@ -229,6 +246,69 @@ def _aplicar_criterios(
     return not motivos, tuple(motivos), folds_positivos, folds_cs_positivos
 
 
+def _indice_adyacente(valores: Sequence[int], a: int, b: int) -> bool:
+    """True solo si a/b son vecinos inmediatos en la grilla predeclarada."""
+    try:
+        ia, ib = tuple(valores).index(a), tuple(valores).index(b)
+    except ValueError:
+        return False
+    return abs(ia - ib) == 1
+
+
+def _dimension_vecina(
+    a: ConfiguracionCeldas,
+    b: ConfiguracionCeldas,
+) -> Optional[str]:
+    """Dimension cambiada si a/b son vecinos locales comparables; si no None."""
+    if a.horizonte_horas != b.horizonte_horas:
+        return None
+    if (a.min_symbols, a.min_timestamps, a.fase_horas) != (
+            b.min_symbols, b.min_timestamps, b.fase_horas):
+        return None
+
+    cambios = []
+    if a.n_bins != b.n_bins:
+        if not _indice_adyacente(N_BINS_CANDIDATOS, a.n_bins, b.n_bins):
+            return None
+        cambios.append("n_bins")
+    if a.min_muestras != b.min_muestras:
+        if not _indice_adyacente(
+                MIN_MUESTRAS_CANDIDATAS, a.min_muestras, b.min_muestras):
+            return None
+        cambios.append("min_muestras")
+    if a.max_radio != b.max_radio:
+        if not _indice_adyacente(
+                MAX_RADIOS_CANDIDATOS, a.max_radio, b.max_radio):
+            return None
+        cambios.append("max_radio")
+    return cambios[0] if len(cambios) == 1 else None
+
+
+def _marcar_robustez_grid(
+    resultados: Sequence[ResultadoConfiguracionFalsacion],
+) -> Tuple[ResultadoConfiguracionFalsacion, ...]:
+    """Marca estabilidad local sin mirar magnitud de performance."""
+    rs = tuple(resultados)
+    aprobadas = tuple(r for r in rs if r.supera_criterios_minimos)
+    salida = []
+    for r in rs:
+        dimensiones = set()
+        if r.supera_criterios_minimos:
+            for otra in aprobadas:
+                if otra is r:
+                    continue
+                d = _dimension_vecina(r.configuracion, otra.configuracion)
+                if d:
+                    dimensiones.add(d)
+        dims = tuple(sorted(dimensiones))
+        salida.append(replace(
+            r,
+            robusta_grid=len(dimensiones) >= MIN_DIMENSIONES_VECINAS_ROBUSTAS,
+            dimensiones_vecinas_robustas=dims,
+        ))
+    return tuple(salida)
+
+
 def evaluar_validacion_predeclarada(
     observaciones: Iterable[ObservacionEdge],
     *,
@@ -263,8 +343,9 @@ def evaluar_validacion_predeclarada(
             motivos_rechazo=motivos,
         ))
 
+    resultados_robustos = _marcar_robustez_grid(resultados)
     return ResultadoValidacionFalsacion(
         n_observaciones_desarrollo=len(desarrollo),
-        n_configuraciones=len(resultados),
-        resultados=tuple(resultados),
+        n_configuraciones=len(resultados_robustos),
+        resultados=resultados_robustos,
     )
