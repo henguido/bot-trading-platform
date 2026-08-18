@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable, Sequence, Tuple
 
-from backend.economia.edge_celdas import ajustar_modelo_celdas
+from backend.economia.edge_celdas import VectorizadorEstado, ajustar_modelo_celdas
+from backend.economia.edge_empirico import NOMBRES_FEATURES, _vector_crudo
 from backend.economia.edge_historico import ObservacionEdge
 from backend.economia.evaluacion_celdas import (
+    MIN_ACTIVOS_CROSS_SECTION,
     PrediccionCeldas, _resumen_cross_section, evaluar_holdout_celdas,
 )
 from backend.economia.muestreo_edge import submuestrear_no_solapado
@@ -113,6 +115,10 @@ def evaluar_walk_forward_celdas(
     folds: Sequence[FoldTemporal],
     embargo_horas: int | None = None,
     fase_horas: int = 0,
+    nombres_features: Sequence[str] = NOMBRES_FEATURES,
+    bins_por_feature: Sequence[int] | None = None,
+    vectorizador: VectorizadorEstado = _vector_crudo,
+    min_activos_cross_section: int = MIN_ACTIVOS_CROSS_SECTION,
 ) -> ResultadoWalkForwardCeldas:
     if isinstance(horizonte_horas, bool) or not isinstance(horizonte_horas, int) \
             or horizonte_horas <= 0:
@@ -179,6 +185,9 @@ def evaluar_walk_forward_celdas(
                 min_symbols=min_symbols,
                 min_timestamps=min_timestamps,
                 max_radio=max_radio,
+                nombres_features=nombres_features,
+                bins_por_feature=bins_por_feature,
+                vectorizador=vectorizador,
             )
         except ValueError as e:
             resultados.append(ResultadoFoldCeldas(
@@ -190,7 +199,10 @@ def evaluar_walk_forward_celdas(
                 predicciones=(), motivo=str(e)))
             continue
 
-        resumen = evaluar_holdout_celdas(modelo, valid_obj)
+        resumen = evaluar_holdout_celdas(
+            modelo, valid_obj,
+            min_activos_cross_section=min_activos_cross_section,
+        )
         todas_predicciones.extend(resumen.predicciones)
         resultados.append(ResultadoFoldCeldas(
             fold=f, n_train_crudo=len(train_crudo),
@@ -229,7 +241,10 @@ def evaluar_walk_forward_celdas(
     uplift_objetivo = (
         real_top - objetivo_medio
         if real_top is not None and objetivo_medio is not None else None)
-    cs = _resumen_cross_section(preds)
+    cs = _resumen_cross_section(
+        preds,
+        min_activos_cross_section=min_activos_cross_section,
+    )
 
     return ResultadoWalkForwardCeldas(
         horizonte_horas=horizonte_horas,

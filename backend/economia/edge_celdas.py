@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from itertools import product
 from types import MappingProxyType
-from typing import Iterable, Mapping, Optional, Tuple
+from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 from backend.economia.edge_empirico import NOMBRES_FEATURES, _percentil_float, _vector_crudo
 from backend.economia.edge_historico import EstadoHistorico, ObservacionEdge
@@ -34,6 +34,7 @@ from backend.economia.estadisticas_edge import resumir_horizonte
 
 DISPONIBLE = "DISPONIBLE"
 NO_DISPONIBLE = "NO_DISPONIBLE"
+VectorizadorEstado = Callable[[object], Tuple[float, ...]]
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,9 @@ class ModeloEdgeCeldas:
     n_muestras_train: int
     min_timestamp_train: int
     max_timestamp_train: int
+    nombres_features: Tuple[str, ...] = NOMBRES_FEATURES
+    bins_por_feature: Tuple[int, ...] = ()
+    vectorizador: VectorizadorEstado = _vector_crudo
 
 
 @dataclass(frozen=True)
@@ -103,19 +107,62 @@ def _validar_hiperparametros(*, horizonte_horas: int, n_bins: int,
         raise ValueError("max_radio debe ser entero no negativo")
 
 
+def _normalizar_nombres(nombres_features: Sequence[str]) -> Tuple[str, ...]:
+    nombres = tuple(nombres_features)
+    if (not nombres or any(not isinstance(n, str) or not n.strip() for n in nombres)
+            or len(set(nombres)) != len(nombres)):
+        raise ValueError("nombres_features invalidos")
+    return tuple(n.strip() for n in nombres)
+
+
+def _normalizar_bins(n_bins: int, bins_por_feature: Sequence[int] | None,
+                     n_features: int) -> Tuple[int, ...]:
+    if bins_por_feature is None:
+        return tuple(n_bins for _ in range(n_features))
+    bins = tuple(bins_por_feature)
+    if len(bins) != n_features:
+        raise ValueError("bins_por_feature incompatible con features")
+    for b in bins:
+        if isinstance(b, bool) or not isinstance(b, int) or b < 2:
+            raise ValueError("bins_por_feature debe contener enteros >= 2")
+    return bins
+
+
+def _vector_validado(vector, n_features: int) -> Tuple[float, ...]:
+    try:
+        valores = tuple(float(v) for v in vector)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("features historicas no numericas") from None
+    if len(valores) != n_features:
+        raise ValueError("dimension de features incompatible")
+    if not all(math.isfinite(v) for v in valores):
+        raise ValueError("features historicas no finitas")
+    return valores
+
+
+def _vector_modelo(modelo: ModeloEdgeCeldas, estado_actual) -> Tuple[float, ...]:
+    return _vector_validado(modelo.vectorizador(estado_actual), len(modelo.nombres_features))
+
+
 def _ajustar_discretizaciones(vectores: Tuple[Tuple[float, ...], ...],
-                              n_bins: int) -> Tuple[DiscretizacionFeature, ...]:
+                              n_bins: int, *,
+                              nombres_features: Sequence[str] = NOMBRES_FEATURES,
+                              bins_por_feature: Sequence[int] | None = None) -> Tuple[DiscretizacionFeature, ...]:
     if not vectores:
         raise ValueError("train vacio")
+    nombres = _normalizar_nombres(nombres_features)
+    bins = _normalizar_bins(n_bins, bins_por_feature, len(nombres))
+    if any(len(v) != len(nombres) for v in vectores):
+        raise ValueError("dimension de features incompatible")
     salida = []
-    for idx, nombre in enumerate(NOMBRES_FEATURES):
+    for idx, (nombre, bins_feature) in enumerate(zip(nombres, bins)):
         valores = tuple(sorted(v[idx] for v in vectores))
         minimo, maximo = valores[0], valores[-1]
         if not (math.isfinite(minimo) and math.isfinite(maximo)):
             raise ValueError("features train no finitas")
         cortes = tuple(sorted(set(
-            _percentil_float(valores, i / n_bins)
-            for i in range(1, n_bins)
+            _percentil_float(valores, i / bins_feature)
+            for i in range(1, bins_feature)
         )))
         salida.append(DiscretizacionFeature(nombre, minimo, maximo, cortes))
     return tuple(salida)
@@ -138,12 +185,17 @@ def ajustar_modelo_celdas(
     min_symbols: int,
     min_timestamps: int,
     max_radio: int,
+    nombres_features: Sequence[str] = NOMBRES_FEATURES,
+    bins_por_feature: Sequence[int] | None = None,
+    vectorizador: VectorizadorEstado = _vector_crudo,
 ) -> ModeloEdgeCeldas:
     _validar_hiperparametros(
         horizonte_horas=horizonte_horas, n_bins=n_bins,
         min_muestras=min_muestras, min_symbols=min_symbols,
         min_timestamps=min_timestamps, max_radio=max_radio,
     )
+    nombres = _normalizar_nombres(nombres_features)
+    bins = _normalizar_bins(n_bins, bins_por_feature, len(nombres))
 
     datos = []
     vectores = []
@@ -152,7 +204,7 @@ def ajustar_modelo_celdas(
             o.etiqueta(horizonte_horas)
         except KeyError:
             continue
-        vectores.append(_vector_crudo(o.estado))
+        vectores.append(_vector_validado(vectorizador(o.estado), len(nombres)))
         datos.append(o)
 
     if len(datos) < min_muestras:
@@ -163,7 +215,11 @@ def ajustar_modelo_celdas(
                    key=lambda p: (p[0].estado.timestamp_ms, p[0].estado.symbol))
     datos_ordenados = tuple(p[0] for p in pares)
     vectores_ordenados = tuple(p[1] for p in pares)
-    discretizaciones = _ajustar_discretizaciones(vectores_ordenados, n_bins)
+    discretizaciones = _ajustar_discretizaciones(
+        vectores_ordenados, n_bins,
+        nombres_features=nombres,
+        bins_por_feature=bins,
+    )
 
     agrupadas: dict[Tuple[int, ...], list[ObservacionEdge]] = {}
     for o, v in zip(datos_ordenados, vectores_ordenados):
@@ -185,6 +241,9 @@ def ajustar_modelo_celdas(
         n_muestras_train=len(datos_ordenados),
         min_timestamp_train=datos_ordenados[0].estado.timestamp_ms,
         max_timestamp_train=datos_ordenados[-1].estado.timestamp_ms,
+        nombres_features=nombres,
+        bins_por_feature=bins,
+        vectorizador=vectorizador,
     )
 
 
@@ -263,7 +322,7 @@ def estimar_edge_celdas(modelo: ModeloEdgeCeldas,
         return _sin_estimacion(modelo, motivo="consulta_no_posterior_a_train")
 
     try:
-        vector = _vector_crudo(estado_actual)
+        vector = _vector_modelo(modelo, estado_actual)
     except ValueError as e:
         return _sin_estimacion(modelo, motivo=str(e))
 

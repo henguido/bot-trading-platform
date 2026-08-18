@@ -27,9 +27,9 @@ from backend.economia.edge_celdas import (
     ModeloEdgeCeldas,
     _clave,
     _fuera_rango,
+    _vector_modelo,
     estimar_edge_celdas,
 )
-from backend.economia.edge_empirico import _vector_crudo
 from backend.economia.edge_historico import ObservacionEdge
 
 DISPONIBLE = "DISPONIBLE"
@@ -126,7 +126,16 @@ def _signo(x: Decimal) -> int:
     return 1 if x > 0 else (-1 if x < 0 else 0)
 
 
-def _resumen_cross_section(predicciones: Tuple[PrediccionCeldas, ...]):
+def _resumen_cross_section(
+    predicciones: Tuple[PrediccionCeldas, ...],
+    *,
+    min_activos_cross_section: int = MIN_ACTIVOS_CROSS_SECTION,
+):
+    if (isinstance(min_activos_cross_section, bool)
+            or not isinstance(min_activos_cross_section, int)
+            or min_activos_cross_section <= 0):
+        raise ValueError("min_activos_cross_section debe ser entero positivo")
+
     por_timestamp = defaultdict(list)
     for p in predicciones:
         por_timestamp[p.timestamp_ms].append(p)
@@ -139,7 +148,7 @@ def _resumen_cross_section(predicciones: Tuple[PrediccionCeldas, ...]):
 
     for ts in sorted(por_timestamp):
         grupo = por_timestamp[ts]
-        if len(grupo) < MIN_ACTIVOS_CROSS_SECTION:
+        if len(grupo) < min_activos_cross_section:
             excluidos += 1
             continue
         baseline = _media(p.real for p in grupo)
@@ -177,6 +186,8 @@ def _resumen_cross_section(predicciones: Tuple[PrediccionCeldas, ...]):
 def evaluar_holdout_celdas(
     modelo: ModeloEdgeCeldas,
     validacion: Iterable[ObservacionEdge],
+    *,
+    min_activos_cross_section: int = MIN_ACTIVOS_CROSS_SECTION,
 ) -> ResumenEvaluacionCeldas:
     objetivo = []
     for o in validacion:
@@ -196,7 +207,7 @@ def evaluar_holdout_celdas(
         if o.estado.timestamp_ms <= modelo.max_timestamp_train:
             continue
         try:
-            vector = _vector_crudo(o.estado)
+            vector = _vector_modelo(modelo, o.estado)
         except ValueError:
             continue
         if _fuera_rango(vector, modelo.discretizaciones) is not None:
@@ -276,7 +287,10 @@ def evaluar_holdout_celdas(
     uplift_objetivo = (
         real_top - objetivo_medio
         if real_top is not None and objetivo_medio is not None else None)
-    cs = _resumen_cross_section(tuple(predicciones))
+    cs = _resumen_cross_section(
+        tuple(predicciones),
+        min_activos_cross_section=min_activos_cross_section,
+    )
 
     return ResumenEvaluacionCeldas(
         estado=DISPONIBLE,
