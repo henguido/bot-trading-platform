@@ -1,0 +1,85 @@
+name: research-04b-v2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-04b-v2-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ""
+  INITIAL_CAPITAL_USD: "500"
+  LIMITE_ASIGNACION_POR_OPERACION: "0.02"
+  BINANCE_API_KEY: ""
+  BINANCE_API_SECRET: ""
+  SECRET_KEY: ci-research-only-synthetic-key-04b-v2-2026
+
+jobs:
+  validate-and-research:
+    if: github.head_ref == 'agent/bot-2.0-04b2-edge-relativo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Technical gate - pytest
+        run: |
+          set -o pipefail
+          pytest -q 2>&1 | tee pytest-v2-output.txt
+
+      - name: Technical gate - compile backend
+        run: python -m compileall backend
+
+      - name: Prove final holdout is physically locked
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from backend.economia.protocolo_edge_v2 import VALIDACION_HASTA_MS, TEST_DESDE_MS
+          assert VALIDACION_HASTA_MS < TEST_DESDE_MS
+          src = Path('scripts/run_edge_validacion_v2.py').read_text(encoding='utf-8')
+          assert 'end_ms = VALIDACION_HASTA_MS' in src
+          assert 'TEST_HASTA_MS' not in src
+          print(f'Validation ends {VALIDACION_HASTA_MS}; final TEST begins {TEST_DESDE_MS}; TEST_MAY_JUL_OPEN=False')
+          PY
+
+      - name: Run v2 validation Jan-Apr only
+        run: python scripts/run_edge_validacion_v2.py
+
+      - name: Upload v2 validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-validation-v2-jan-apr-2026
+          path: artifacts/edge-validation-v2-jan-apr-2026.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-v2-output
+          path: pytest-v2-output.txt
+          if-no-files-found: warn
+          retention-days: 3
