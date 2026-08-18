@@ -14,6 +14,7 @@ concurrency:
 
 env:
   APP_ENV: test
+  DATABASE_URL: sqlite:///./backend/app.db
   TRADING_MODE: PAPER
   ALLOW_LIVE_TRADING: ""
   INITIAL_CAPITAL_USD: "500"
@@ -26,7 +27,7 @@ jobs:
   validate-and-research:
     if: github.head_ref == 'agent/bot-2.0-04b2-edge-relativo'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout PR
         uses: actions/checkout@v4
@@ -50,6 +51,21 @@ jobs:
 
       - name: Technical gate - compile backend
         run: python -m compileall backend
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Technical gate - frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Technical gate - frontend build
+        working-directory: frontend
+        run: npm run build
 
       - name: Prove final holdout is physically locked
         run: |
