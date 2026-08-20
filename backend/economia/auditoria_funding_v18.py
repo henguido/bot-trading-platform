@@ -22,7 +22,7 @@ from backend.economia.protocolo_funding_v18 import (
 
 _DIA_MS = 86_400_000
 _HORA_MS = 3_600_000
-_TOLERANCIA_INTERVALO_MS = 300_000  # 5 min: absorbe jitter de settlement.
+_TOLERANCIA_GAP_MS = 300_000
 
 
 @dataclass(frozen=True)
@@ -68,27 +68,23 @@ def _rango_dias():
         d += timedelta(days=1)
 
 
-def _clasificar_intervalo(delta_ms: int) -> str:
-    horas = max(1, int((delta_ms + (_HORA_MS // 2)) // _HORA_MS))
-    if abs(delta_ms - horas * _HORA_MS) <= _TOLERANCIA_INTERVALO_MS:
-        return str(horas)
-    return "OTRO"
-
-
 def _auditar_simbolo(symbol: str, eventos: Sequence[EventoFundingV18]) -> CoberturaFundingSimboloV18:
     desde_ms = int(DESDE_V18.timestamp() * 1000)
     hasta_ms = int(HASTA_EXCLUSIVO_V18.timestamp() * 1000)
-    tiempos = [e.funding_time_ms for e in eventos if desde_ms <= e.funding_time_ms < hasta_ms]
+    dentro = [e for e in eventos if desde_ms <= e.funding_time_ms < hasta_ms]
+    tiempos = [e.funding_time_ms for e in dentro]
     duplicados = len(tiempos) - len(set(tiempos))
     unicos = sorted(set(tiempos))
     dias = {ts // _DIA_MS for ts in unicos}
     frac = Decimal(len(dias)) / Decimal(DIAS_ESPERADOS_V18)
 
     deltas = [b - a for a, b in zip(unicos, unicos[1:])]
-    intervalos = Counter(_clasificar_intervalo(d) for d in deltas)
+    # El archivo publica explícitamente funding_interval_hours. Se reporta ese
+    # dato y no se infiere una cadencia fija desde los timestamps.
+    intervalos = Counter(str(e.funding_interval_hours) for e in dentro)
     max_gap = max(deltas, default=0)
     max_gap_horas = (Decimal(max_gap) / Decimal(_HORA_MS)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
-    gaps_24 = sum(d > (_DIA_MS + _TOLERANCIA_INTERVALO_MS) for d in deltas)
+    gaps_24 = sum(d > (_DIA_MS + _TOLERANCIA_GAP_MS) for d in deltas)
     apto = frac >= FRACCION_COBERTURA_SIMBOLO_MIN_V18 and duplicados == 0
 
     return CoberturaFundingSimboloV18(
@@ -100,14 +96,12 @@ def _auditar_simbolo(symbol: str, eventos: Sequence[EventoFundingV18]) -> Cobert
         duplicados=duplicados,
         gaps_mayores_24h=gaps_24,
         max_gap_horas=max_gap_horas,
-        intervalos_horas=tuple(sorted(intervalos.items(), key=lambda x: (x[0] == "OTRO", x[0]))),
+        intervalos_horas=tuple(sorted(intervalos.items(), key=lambda x: int(x[0]))),
         apto=apto,
     )
 
 
-def auditar_funding_v18(
-    series: Mapping[str, Sequence[EventoFundingV18]],
-) -> AuditoriaFundingV18:
+def auditar_funding_v18(series: Mapping[str, Sequence[EventoFundingV18]]) -> AuditoriaFundingV18:
     coberturas = tuple(
         _auditar_simbolo(symbol, series.get(symbol, ()))
         for symbol in UNIVERSO_FUNDING_V18
