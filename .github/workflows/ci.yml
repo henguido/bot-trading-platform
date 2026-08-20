@@ -73,26 +73,34 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Assert v20 keeps 2026 closed
+      - name: Assert v20.1 keeps 2026 closed and no imputation
         run: |
           python - <<'PY'
-          from backend.economia.protocolo_posicionamiento_v20 import (
-              DESARROLLO_2026_ABIERTO_V20,
-              TEST_MAY_JUL_ABIERTO_V20,
+          from backend.economia.protocolo_posicionamiento_v20a import (
+              DESARROLLO_2026_ABIERTO_V20A,
+              TEST_MAY_JUL_ABIERTO_V20A,
+              ORDEN_CANONICO_CREATE_TIME_V20A,
+              DUPLICADOS_FAIL_CLOSED_V20A,
+              FECHA_FUERA_ARCHIVO_FAIL_CLOSED_V20A,
+              IMPUTACION_PERMITIDA_V20A,
           )
-          assert DESARROLLO_2026_ABIERTO_V20 is False
-          assert TEST_MAY_JUL_ABIERTO_V20 is False
-          print("v20 locks OK")
+          assert DESARROLLO_2026_ABIERTO_V20A is False
+          assert TEST_MAY_JUL_ABIERTO_V20A is False
+          assert ORDEN_CANONICO_CREATE_TIME_V20A is True
+          assert DUPLICADOS_FAIL_CLOSED_V20A is True
+          assert FECHA_FUERA_ARCHIVO_FAIL_CLOSED_V20A is True
+          assert IMPUTACION_PERMITIDA_V20A is False
+          print("v20.1 locks OK")
           PY
 
-      - name: Run offline v20 positioning data audit
-        run: python scripts/run_positioning_audit_v20.py
+      - name: Run offline v20.1 normalized positioning audit
+        run: python scripts/run_positioning_audit_v20a.py
 
-      - name: Upload v20 audit
+      - name: Upload v20.1 audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: positioning-data-audit-v20-2022-2025
-          path: artifacts/positioning-data-audit-v20-2022-2025.json
+          name: positioning-data-audit-v20a-2022-2025
+          path: artifacts/positioning-data-audit-v20a-2022-2025.json
           if-no-files-found: warn
           retention-days: 7
