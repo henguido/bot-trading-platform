@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Iterable, Sequence, Tuple
+from typing import Iterable, Optional, Sequence, Tuple
 
 HORIZONTES_EXPLORATORIOS_HORAS = (4, 8, 12, 24)
 VENTANA_ESTADO_HORAS = 24
@@ -75,6 +75,11 @@ class Vela:
     close_time_ms: int
     quote_volume: Decimal
     trades: int
+    # Campos 9 y 10 del kline Spot de Binance. Son opcionales para conservar
+    # compatibilidad con fixtures historicos que solo contienen los 9 campos
+    # previamente consumidos. Desconocido permanece None, nunca se vuelve cero.
+    taker_buy_base_volume: Optional[Decimal] = None
+    taker_buy_quote_volume: Optional[Decimal] = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +130,12 @@ def vela_desde_kline(fila) -> Vela:
     qv = _decimal(fila[7], "quote_volume")
     trades = _entero(fila[8], "trades")
 
+    taker_base = None
+    taker_quote = None
+    if len(fila) >= 11:
+        taker_base = _decimal(fila[9], "taker_buy_base_volume")
+        taker_quote = _decimal(fila[10], "taker_buy_quote_volume")
+
     if t1 <= t0:
         raise ValueError("timestamps de kline invalidos")
     if min(o, h, l, c) <= 0:
@@ -133,8 +144,16 @@ def vela_desde_kline(fila) -> Vela:
         raise ValueError("OHLC inconsistente")
     if vol < 0 or qv < 0 or trades < 0:
         raise ValueError("volumen/trades no pueden ser negativos")
+    if taker_base is not None:
+        if taker_base < 0 or taker_quote is None or taker_quote < 0:
+            raise ValueError("taker-buy no puede ser negativo")
+        if taker_base > vol or taker_quote > qv:
+            raise ValueError("taker-buy no puede exceder volumen total")
 
-    return Vela(t0, o, h, l, c, vol, t1, qv, trades)
+    return Vela(
+        t0, o, h, l, c, vol, t1, qv, trades,
+        taker_base, taker_quote,
+    )
 
 
 def velas_desde_klines(filas: Iterable) -> Tuple[Vela, ...]:
