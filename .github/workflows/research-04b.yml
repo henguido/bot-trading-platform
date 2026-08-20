@@ -64,3 +64,55 @@ jobs:
           path: artifacts/edge-validation-2025.json
           if-no-files-found: error
           retention-days: 7
+
+  positioning-v21:
+    if: github.head_ref == 'agent/bot-2.0-04b21-oi-taker-flow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Assert v21 methodology locks
+        run: |
+          python - <<'PY'
+          from backend.economia.protocolo_posicionamiento_v21 import (
+              DESARROLLO_2026_ABIERTO_V21,
+              TEST_MAY_JUL_ABIERTO_V21,
+              IMPUTACION_PERMITIDA_V21,
+              PERMITE_INVERTIR_SIGNO_V21,
+              PERMITE_AJUSTAR_UMBRALES_POST_RESULTADO_V21,
+              HURDLE_TOTAL_BPS_V21,
+          )
+          assert DESARROLLO_2026_ABIERTO_V21 is False
+          assert TEST_MAY_JUL_ABIERTO_V21 is False
+          assert IMPUTACION_PERMITIDA_V21 is False
+          assert PERMITE_INVERTIR_SIGNO_V21 is False
+          assert PERMITE_AJUSTAR_UMBRALES_POST_RESULTADO_V21 is False
+          assert str(HURDLE_TOTAL_BPS_V21) == '25'
+          print('v21 locks OK')
+          PY
+
+      - name: Run offline v21 OI+taker diagnostic
+        run: python scripts/run_positioning_v21_desarrollo.py
+
+      - name: Upload v21 diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: positioning-v21-desarrollo-2022-2025
+          path: artifacts/positioning-v21-desarrollo-2022-2025.json
+          if-no-files-found: warn
+          retention-days: 7
