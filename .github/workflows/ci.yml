@@ -73,26 +73,26 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Assert v15 keeps 2026 closed
+      - name: Assert v16 keeps 2026 closed
         run: |
           python - <<'PY'
-          from backend.economia.protocolo_premium_v15 import (
-              DESARROLLO_2026_ABIERTO_V15,
-              TEST_MAY_JUL_ABIERTO_V15,
+          from backend.economia.protocolo_perp_v16 import (
+              DESARROLLO_2026_ABIERTO_V16,
+              TEST_MAY_JUL_ABIERTO_V16,
           )
-          assert DESARROLLO_2026_ABIERTO_V15 is False
-          assert TEST_MAY_JUL_ABIERTO_V15 is False
-          print("v15 locks OK")
+          assert DESARROLLO_2026_ABIERTO_V16 is False
+          assert TEST_MAY_JUL_ABIERTO_V16 is False
+          print("v16 locks OK")
           PY
 
-      - name: Run offline v15 premium cross-sectional diagnostic
-        run: python scripts/run_premium_v15_desarrollo.py
+      - name: Run offline v16 perpetual futures data audit
+        run: python scripts/run_perp_audit_v16.py
 
-      - name: Upload v15 diagnostic
+      - name: Upload v16 audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: premium-v15-desarrollo-2022-2025
-          path: artifacts/premium-v15-desarrollo-2022-2025.json
+          name: perp-data-audit-v16-2022-2025
+          path: artifacts/perp-data-audit-v16-2022-2025.json
           if-no-files-found: warn
           retention-days: 7
