@@ -158,7 +158,7 @@ def main() -> int:
     if not datos_suficientes:
         status = "DATOS_INSUFICIENTES_V22"
     elif evaluacion is not None and evaluacion.apta:
-        status = "REBORE_DESAPALANCAMIENTO_APTO_V22"
+        status = "REBOTE_DESAPALANCAMIENTO_APTO_V22"
     else:
         status = "REBOTE_DESAPALANCAMIENTO_FALSADO_V22"
 
