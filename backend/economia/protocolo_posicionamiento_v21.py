@@ -41,6 +41,11 @@ TIMESTAMPS_EN_GRILLA_5M_REQUERIDOS_V21 = True
 # 08:00, 16:00 y 00:00 UTC del día siguiente respectivamente.
 VENTANAS_DIARIAS_UTC_V21 = ((0, 8), (8, 16), (16, 24))
 
+# Calidad mínima para emitir VEREDICTO ECONÓMICO. Si no se alcanza, el runner
+# debe terminar como DATOS_INSUFICIENTES y NO como hipótesis falsada.
+FRACCION_ARCHIVOS_METRICAS_COMPLETOS_MIN_V21 = Decimal("0.95")
+MIN_SIMBOLOS_SPOT_COMPLETOS_V21 = 15
+
 # Elegibilidad por timestamp. La ventana [T-8h, T) nunca incluye T.
 MIN_SIMBOLOS_POR_TIMESTAMP_V21 = 15
 FRACCION_TAKER_VALIDA_MIN_V21 = Decimal("0.90")
