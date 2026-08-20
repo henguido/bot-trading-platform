@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pytest
+
 from backend.economia.auditoria_posicionamiento_v20 import auditar_posicionamiento_v20
 from backend.economia.historico_posicionamiento_v20 import (
     ArchivoMetricasV20,
@@ -45,7 +47,7 @@ def _campos(*, ratio_invalido=None, core_positivos=288):
     return tuple(out)
 
 
-def _muestras(*, ratio_invalido=None, n_5m=287, core_positivos=288):
+def _muestras(*, ratio_invalido=None, n_5m=287, core_positivos=288, no_ascendentes=0, duplicados=0):
     out = []
     for symbol in UNIVERSO_POSICIONAMIENTO_V20:
         for year in (2022, 2023, 2024, 2025):
@@ -59,8 +61,8 @@ def _muestras(*, ratio_invalido=None, n_5m=287, core_positivos=288):
                     n_filas=288,
                     primer_ts_ms=1,
                     ultimo_ts_ms=2,
-                    duplicados=0,
-                    no_ascendentes=0,
+                    duplicados=duplicados,
+                    no_ascendentes=no_ascendentes,
                     n_deltas=287,
                     n_deltas_5m=n_5m,
                     campos=_campos(ratio_invalido=ratio_invalido, core_positivos=core_positivos),
@@ -117,6 +119,39 @@ def test_cadencia_degradada_falla_sin_rellenar_snapshots():
     assert r.dataset_apto is False
     assert r.fraccion_cadencia_5m < 0.95
     assert "CADENCIA_5M_INSUFICIENTE" in r.motivos_rechazo
+
+
+def test_v20_estricto_sigue_rechazando_orden_fisico_no_ascendente():
+    listados = {s: _listado(s) for s in UNIVERSO_POSICIONAMIENTO_V20}
+    r = auditar_posicionamiento_v20(listados, _muestras(no_ascendentes=1))
+    assert r.dataset_apto is False
+    assert "TIMESTAMPS_NO_ASCENDENTES_EN_MUESTRA" in r.motivos_rechazo
+
+
+def test_v20a_acepta_reorden_canonico_pero_no_duplicados():
+    listados = {s: _listado(s) for s in UNIVERSO_POSICIONAMIENTO_V20}
+    orden = auditar_posicionamiento_v20(
+        listados,
+        _muestras(no_ascendentes=2),
+        rechazar_no_ascendentes=False,
+    )
+    assert orden.dataset_apto is True
+    assert orden.no_ascendentes_muestra > 0
+    assert "TIMESTAMPS_NO_ASCENDENTES_EN_MUESTRA" not in orden.motivos_rechazo
+
+    duplicados = auditar_posicionamiento_v20(
+        listados,
+        _muestras(no_ascendentes=2, duplicados=1),
+        rechazar_no_ascendentes=False,
+    )
+    assert duplicados.dataset_apto is False
+    assert "TIMESTAMPS_DUPLICADOS_EN_MUESTRA" in duplicados.motivos_rechazo
+
+
+def test_parametro_normalizacion_debe_ser_booleano():
+    listados = {s: _listado(s) for s in UNIVERSO_POSICIONAMIENTO_V20}
+    with pytest.raises(ValueError, match="bool"):
+        auditar_posicionamiento_v20(listados, _muestras(), rechazar_no_ascendentes=1)
 
 
 def test_v20_no_abre_2026_ni_holdout_final():
