@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""BOT 2.0-04B-v18: audita funding USD-M real 2022-2025."""
+"""BOT 2.0-04B-v18: audita funding USD-M real 2022-2025 vía Binance Vision."""
 from __future__ import annotations
 
 import json
 import sys
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +14,7 @@ if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
 from backend.economia.auditoria_funding_v18 import auditar_funding_v18
-from backend.economia.historico_funding_v18 import descargar_funding_rango_v18
+from backend.economia.historico_funding_v18 import descargar_funding_mes_v18
 from backend.economia.protocolo_funding_v18 import (
     DESARROLLO_2026_ABIERTO_V18,
     DESDE_V18,
@@ -23,7 +24,7 @@ from backend.economia.protocolo_funding_v18 import (
 )
 
 SALIDA = RAIZ / "artifacts" / "funding-data-audit-v18-2022-2025.json"
-MAX_WORKERS = 4
+MAX_WORKERS = 8
 
 
 def _jsonable(x):
@@ -42,42 +43,59 @@ def main() -> int:
     assert DESARROLLO_2026_ABIERTO_V18 is False
     assert TEST_MAY_JUL_ABIERTO_V18 is False
     assert HASTA_EXCLUSIVO_V18.year == 2026 and HASTA_EXCLUSIVO_V18.month == 1
-    desde_ms = int(DESDE_V18.timestamp() * 1000)
-    hasta_ms = int(HASTA_EXCLUSIVO_V18.timestamp() * 1000)
 
+    tareas = [
+        (symbol, year, month)
+        for symbol in UNIVERSO_FUNDING_V18
+        for year in range(DESDE_V18.year, HASTA_EXCLUSIVO_V18.year)
+        for month in range(1, 13)
+    ]
     print(
-        f"[04B-v18] audit funding symbols={len(UNIVERSO_FUNDING_V18)} "
+        f"[04B-v18] audit funding Vision tareas={len(tareas)} "
         f"workers={MAX_WORKERS} 2026_OPEN=False"
     )
+
     resultados = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futuros = {
-            pool.submit(descargar_funding_rango_v18, symbol, desde_ms, hasta_ms): symbol
-            for symbol in UNIVERSO_FUNDING_V18
+            pool.submit(descargar_funding_mes_v18, symbol, year, month): (symbol, year, month)
+            for symbol, year, month in tareas
         }
         for fut in as_completed(futuros):
             resultados.append(fut.result())
 
-    por_symbol = {r.symbol: r.eventos for r in resultados if r.completa}
+    series = defaultdict(list)
+    for r in resultados:
+        if r.completa:
+            series[r.symbol].extend(r.eventos)
+    por_symbol = {
+        symbol: tuple(sorted(eventos, key=lambda e: e.funding_time_ms))
+        for symbol, eventos in series.items()
+    }
     audit = auditar_funding_v18(por_symbol)
-    descargas_completas = sum(r.completa for r in resultados)
-    n_requests = sum(r.n_requests for r in resultados)
-    descargas_ok = descargas_completas == len(UNIVERSO_FUNDING_V18)
-    dataset_apto = audit.dataset_apto and descargas_ok
+
+    meses_ok = sum(r.completa for r in resultados)
+    meses_404 = sum(r.status_http == 404 for r in resultados)
+    meses_error = len(resultados) - meses_ok - meses_404
+    # Un 404 representa ausencia histórica visible y la decide la cobertura;
+    # un error distinto de 404 es fallo técnico y bloquea el dataset.
+    dataset_apto = audit.dataset_apto and meses_error == 0
     motivos = list(audit.motivos_rechazo)
-    if not descargas_ok:
-        motivos.append("DESCARGA_FUNDING_INCOMPLETA")
+    if meses_error:
+        motivos.append("DESCARGA_FUNDING_ERROR")
 
     reporte = {
         "status": "DATASET_FUNDING_APTO_V18" if dataset_apto else "DATASET_FUNDING_NO_APTO_V18",
         "desarrollo_2026_open": False,
         "test_may_jul_open": False,
-        "fuente": "https://fapi.binance.com/fapi/v1/fundingRate",
+        "fuente": "data.binance.vision/futures/um/monthly/fundingRate",
         "desde": DESDE_V18.isoformat(),
         "hasta_exclusivo": HASTA_EXCLUSIVO_V18.isoformat(),
         "n_simbolos": len(UNIVERSO_FUNDING_V18),
-        "descargas_completas": descargas_completas,
-        "n_requests": n_requests,
+        "n_tareas_mensuales": len(tareas),
+        "meses_ok": meses_ok,
+        "meses_404": meses_404,
+        "meses_error": meses_error,
         "n_eventos_total": sum(len(r.eventos) for r in resultados if r.completa),
         "n_simbolos_aptos": audit.n_simbolos_aptos,
         "dias_cross_section_completa": audit.dias_cross_section_completa,
@@ -110,14 +128,15 @@ def main() -> int:
             }
             for a in audit.anios
         ],
-        "descargas_fallidas": [
+        "meses_fallidos": [
             {
                 "symbol": r.symbol,
-                "n_requests": r.n_requests,
+                "year": r.year,
+                "month": r.month,
                 "status_http": r.status_http,
                 "error": r.error,
             }
-            for r in sorted(resultados, key=lambda x: x.symbol)
+            for r in sorted(resultados, key=lambda x: (x.symbol, x.year, x.month))
             if not r.completa
         ],
     }
@@ -127,8 +146,8 @@ def main() -> int:
         encoding="utf-8",
     )
     print(
-        f"[04B-v18] {reporte['status']}: downloads={descargas_completas}/{len(UNIVERSO_FUNDING_V18)} "
-        f"requests={n_requests} events={reporte['n_eventos_total']} "
+        f"[04B-v18] {reporte['status']}: meses_ok={meses_ok}/{len(tareas)} "
+        f"404={meses_404} errors={meses_error} events={reporte['n_eventos_total']} "
         f"symbols_aptos={audit.n_simbolos_aptos} cross={audit.fraccion_cross_section_completa}"
     )
     return 0
