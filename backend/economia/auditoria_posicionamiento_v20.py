@@ -105,7 +105,18 @@ def _dias_periodo():
 def auditar_posicionamiento_v20(
     listados: Mapping[str, ListadoMetricasV20],
     muestras: Sequence[ResumenArchivoMetricasV20],
+    *,
+    rechazar_no_ascendentes: bool = True,
 ) -> AuditoriaPosicionamientoV20:
+    """Audita cobertura/calidad; v20 estricto rechaza orden físico no ascendente.
+
+    ``rechazar_no_ascendentes=False`` existe para v20.1, donde el orden físico
+    no es semántico y la serie se considera canónica por ``create_time``. Esto
+    no relaja duplicados, fechas fuera del ZIP, cobertura, cadencia ni calidad.
+    """
+    if not isinstance(rechazar_no_ascendentes, bool):
+        raise ValueError("rechazar_no_ascendentes debe ser bool")
+
     coberturas = []
     fechas_por_symbol = {}
     for symbol in UNIVERSO_POSICIONAMIENTO_V20:
@@ -221,7 +232,7 @@ def auditar_posicionamiento_v20(
         motivos.append("MUESTRAS_PARSEADAS_INSUFICIENTES")
     if duplicados:
         motivos.append("TIMESTAMPS_DUPLICADOS_EN_MUESTRA")
-    if no_asc:
+    if no_asc and rechazar_no_ascendentes:
         motivos.append("TIMESTAMPS_NO_ASCENDENTES_EN_MUESTRA")
     if frac_5m < FRACCION_CADENCIA_5M_MIN_V20:
         motivos.append("CADENCIA_5M_INSUFICIENTE")
