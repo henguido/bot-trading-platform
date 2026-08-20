@@ -137,10 +137,33 @@ def main() -> int:
         f"rows={audit.n_filas_muestra} cadence5m={audit.fraccion_cadencia_5m} "
         f"core_oi={audit.core_oi_apto} ratios={','.join(audit.campos_ratios_usables) or 'ninguno'}"
     )
+    print(
+        f"[04B-v20] reject_reasons={','.join(audit.motivos_rechazo) or 'ninguno'} "
+        f"duplicates={audit.duplicados_muestra} nonascending={audit.no_ascendentes_muestra} "
+        f"cross={audit.fraccion_cross_section_completa} symbols_apt={audit.n_simbolos_aptos}"
+    )
+    for a in audit.anios:
+        print(
+            f"[04B-v20] year={a.year} cross_days={a.dias_cross_section_completa}/{a.dias} "
+            f"cross={a.fraccion_cross_section_completa} apt={a.apto}"
+        )
+    for s in audit.simbolos:
+        if (not s.apto) or s.meses_con_archivo < 48 or s.n_dias_unicos < s.dias_esperados:
+            print(
+                f"[04B-v20] symbol={s.symbol} files={s.n_archivos} days={s.n_dias_unicos}/{s.dias_esperados} "
+                f"coverage={s.fraccion_cobertura} months={s.meses_con_archivo} "
+                f"dup_dates={s.fechas_duplicadas} zero_size={s.archivos_tamano_cero} apt={s.apto}"
+            )
     for c in audit.campos:
         print(
             f"[04B-v20] field={c.nombre} valid={c.fraccion_valida} "
             f"positive={c.fraccion_positiva} usable={c.usable}"
+        )
+    fallidas = [r for r in sorted(resultados_muestra, key=lambda x: (x.symbol, x.fecha)) if not r.completa]
+    for r in fallidas:
+        print(
+            f"[04B-v20] sample_failed symbol={r.symbol} date={r.fecha.isoformat()} "
+            f"error={r.error}"
         )
     return 0
 
