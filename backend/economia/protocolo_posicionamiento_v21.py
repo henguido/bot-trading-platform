@@ -32,6 +32,14 @@ HORIZONTE_RETORNO_HORAS_V21 = 8
 FASE_UTC_HORAS_V21 = (0, 8, 16)
 INTERVALO_METRICAS_MINUTOS_V21 = 5
 INTERVALO_SPOT_V21 = "4h"
+SNAPSHOTS_ESPERADOS_POR_VENTANA_V21 = 96
+FRACCION_SNAPSHOTS_MIN_V21 = Decimal("0.90")
+TIMESTAMPS_EN_GRILLA_5M_REQUERIDOS_V21 = True
+
+# Cada ZIP diario se divide, sin solapamiento, en [00,08), [08,16), [16,24).
+# La señal usa solo esas filas y entra al inicio del bloque siguiente:
+# 08:00, 16:00 y 00:00 UTC del día siguiente respectivamente.
+VENTANAS_DIARIAS_UTC_V21 = ((0, 8), (8, 16), (16, 24))
 
 # Elegibilidad por timestamp. La ventana [T-8h, T) nunca incluye T.
 MIN_SIMBOLOS_POR_TIMESTAMP_V21 = 15
@@ -71,6 +79,7 @@ USA_COUNT_LONG_SHORT_RATIO_V21 = False
 USA_PRECIO_PREVIO_COMO_FEATURE_V21 = False
 USA_FUNDING_V21 = False
 USA_BASIS_V21 = False
+IMPUTACION_PERMITIDA_V21 = False
 
 DESARROLLO_2026_ABIERTO_V21 = False
 TEST_MAY_JUL_ABIERTO_V21 = False
