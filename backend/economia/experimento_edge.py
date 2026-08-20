@@ -1,0 +1,351 @@
+"""Orquestacion OFFLINE del experimento predeclarado de Expected Edge.
+
+No se importa desde main.py. No llama GPT, RiskEngine ni ejecuta ordenes.
+Descarga/procesa un simbolo por vez para limitar memoria. El protocolo usa
+velas 4h: 4/8/12/24h son multiplos exactos y el estado 24h usa seis velas.
+
+TEST 2026 permanece bloqueado: `evaluar_validacion_predeclarada` elimina de
+forma explicita cualquier observacion >= CORTE_TEST_MS antes de evaluar.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, replace
+from decimal import Decimal
+from typing import Iterable, Optional, Sequence, Tuple
+
+from backend.economia.dataset_edge import construir_dataset
+from backend.economia.edge_historico import ObservacionEdge
+from backend.economia.evaluacion_celdas import _resumen_cross_section
+from backend.economia.historico_binance import (
+    descargar_klines_data_api,
+    descargar_klines_rango,
+)
+from backend.economia.protocolo_experimento_edge import (
+    COBERTURA_MINIMA_VALIDACION,
+    CORTE_TEST_MS,
+    DATASET_DESDE_MS,
+    DATASET_HASTA_MS,
+    FOLDS_MINIMOS_CON_UPLIFT_POSITIVO,
+    FOLDS_VALIDACION_2025,
+    FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA,
+    INTERVALO_HORAS,
+    INTERVALO_KLINE,
+    MAX_RADIOS_CANDIDATOS,
+    MESES_CROSS_SECTION_MINIMOS,
+    MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS,
+    MIN_DIMENSIONES_VECINAS_ROBUSTAS,
+    MIN_MUESTRAS_CANDIDATAS,
+    N_BINS_CANDIDATOS,
+    SURVIVORSHIP_PENDIENTE,
+    UNIVERSO_FALSACION,
+    UNIVERSO_FUENTE,
+    UPLIFT_CROSS_SECTION_MINIMO,
+    VENTANA_ESTADO_HORAS,
+    ConfiguracionCeldas,
+    configuraciones_predeclaradas,
+)
+from backend.economia.walk_forward_celdas import ResultadoWalkForwardCeldas, evaluar_walk_forward_celdas
+
+
+@dataclass(frozen=True)
+class ResumenDescargaSimbolo:
+    symbol: str
+    completa: bool
+    error: Optional[str]
+    fuente: str
+    error_fuente_primaria: Optional[str]
+    n_requests: int
+    n_velas: int
+    inicio_open_ms: Optional[int]
+    fin_open_ms: Optional[int]
+    n_gaps: int
+    horas_faltantes_estimadas: int
+    n_observaciones_4h: int
+
+    @property
+    def util_para_experimento(self) -> bool:
+        """Una descarga vacia no cuenta como cobertura del universo."""
+        return self.completa and self.n_velas > 0 and self.n_observaciones_4h > 0
+
+
+@dataclass(frozen=True)
+class DatasetFalsacion:
+    observaciones_4h: Tuple[ObservacionEdge, ...]
+    descargas: Tuple[ResumenDescargaSimbolo, ...]
+    universo_fuente: str
+    sesgo_supervivencia_pendiente: bool
+
+    @property
+    def n_symbols_completos(self) -> int:
+        """Compatibilidad: respuestas completas, aunque no tengan historia util."""
+        return sum(d.completa for d in self.descargas)
+
+    @property
+    def n_symbols_utiles(self) -> int:
+        """Cobertura real del experimento: descarga completa + observaciones."""
+        return sum(d.util_para_experimento for d in self.descargas)
+
+
+@dataclass(frozen=True)
+class ResultadoConfiguracionFalsacion:
+    configuracion: ConfiguracionCeldas
+    resultado: ResultadoWalkForwardCeldas
+    folds_con_uplift_positivo: int
+    folds_cross_section_positivos: int
+    supera_criterios_minimos: bool
+    motivos_rechazo: Tuple[str, ...]
+    robusta_grid: bool = False
+    dimensiones_vecinas_robustas: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResultadoValidacionFalsacion:
+    n_observaciones_desarrollo: int
+    n_configuraciones: int
+    resultados: Tuple[ResultadoConfiguracionFalsacion, ...]
+
+    @property
+    def n_superan_minimos(self) -> int:
+        return sum(r.supera_criterios_minimos for r in self.resultados)
+
+    @property
+    def n_robustas_grid(self) -> int:
+        return sum(r.robusta_grid for r in self.resultados)
+
+    @property
+    def horizontes_robustos(self) -> Tuple[int, ...]:
+        return tuple(sorted({
+            r.configuracion.horizonte_horas
+            for r in self.resultados if r.robusta_grid
+        }))
+
+
+def preparar_dataset_falsacion(
+    binance,
+    *,
+    symbols: Sequence[str] = UNIVERSO_FALSACION,
+    start_ms: int = DATASET_DESDE_MS,
+    end_ms: int = DATASET_HASTA_MS,
+) -> DatasetFalsacion:
+    """Descarga cada symbol: API principal y fallback market-data-only publico."""
+    observaciones = []
+    resumenes = []
+
+    for symbol in tuple(symbols):
+        primaria = descargar_klines_rango(
+            binance, symbol, interval=INTERVALO_KLINE,
+            start_ms=start_ms, end_ms=end_ms, limit=1000)
+        descarga = primaria
+        error_primaria = None
+        if not primaria.completa:
+            error_primaria = primaria.error
+            descarga = descargar_klines_data_api(
+                symbol, interval=INTERVALO_KLINE,
+                start_ms=start_ms, end_ms=end_ms, limit=1000)
+
+        if not descarga.completa:
+            resumenes.append(ResumenDescargaSimbolo(
+                symbol=symbol, completa=False, error=descarga.error,
+                fuente=descarga.fuente, error_fuente_primaria=error_primaria,
+                n_requests=primaria.n_requests + descarga.n_requests,
+                n_velas=0, inicio_open_ms=None, fin_open_ms=None,
+                n_gaps=0, horas_faltantes_estimadas=0,
+                n_observaciones_4h=0))
+            continue
+
+        manifiesto = construir_dataset(
+            {symbol: descarga.velas},
+            intervalo_horas=INTERVALO_HORAS,
+            ventana_horas=VENTANA_ESTADO_HORAS,
+            universo_fuente=UNIVERSO_FUENTE,
+            sesgo_supervivencia_pendiente=SURVIVORSHIP_PENDIENTE)
+        cobertura = manifiesto.coberturas[0]
+        observaciones.extend(manifiesto.observaciones)
+        resumenes.append(ResumenDescargaSimbolo(
+            symbol=symbol, completa=True, error=None,
+            fuente=descarga.fuente, error_fuente_primaria=error_primaria,
+            n_requests=primaria.n_requests + descarga.n_requests,
+            n_velas=cobertura.n_velas,
+            inicio_open_ms=cobertura.inicio_open_ms,
+            fin_open_ms=cobertura.fin_open_ms,
+            n_gaps=cobertura.n_gaps,
+            horas_faltantes_estimadas=cobertura.horas_faltantes_estimadas,
+            n_observaciones_4h=cobertura.n_observaciones,
+        ))
+
+    observaciones.sort(key=lambda o: (o.estado.timestamp_ms, o.estado.symbol))
+    return DatasetFalsacion(
+        observaciones_4h=tuple(observaciones),
+        descargas=tuple(resumenes),
+        universo_fuente=UNIVERSO_FUENTE,
+        sesgo_supervivencia_pendiente=SURVIVORSHIP_PENDIENTE,
+    )
+
+
+def _media_decimal(valores) -> Optional[Decimal]:
+    v = tuple(valores)
+    return sum(v, Decimal("0")) / Decimal(len(v)) if v else None
+
+
+def _uplift_fold(predicciones) -> Optional[Decimal]:
+    p = tuple(predicciones)
+    if not p:
+        return None
+    baseline = _media_decimal(x.real for x in p)
+    ordenadas = sorted(p, key=lambda x: (-x.predicho, x.timestamp_ms, x.symbol))
+    n_top = max(1, int(math.ceil(len(ordenadas) * 0.25)))
+    top = _media_decimal(x.real for x in ordenadas[:n_top])
+    return top - baseline if top is not None and baseline is not None else None
+
+
+def _uplift_cross_section_fold(predicciones) -> Optional[Decimal]:
+    return _resumen_cross_section(tuple(predicciones))["uplift"]
+
+
+def _aplicar_criterios(
+    resultado: ResultadoWalkForwardCeldas,
+) -> tuple[bool, Tuple[str, ...], int, int]:
+    motivos = []
+    if resultado.cobertura < COBERTURA_MINIMA_VALIDACION:
+        motivos.append("COBERTURA_INSUFICIENTE")
+    if resultado.n_folds_disponibles != len(FOLDS_VALIDACION_2025):
+        motivos.append("FOLDS_INCOMPLETOS")
+    if resultado.uplift_top25_vs_objetivo is None or resultado.uplift_top25_vs_objetivo <= 0:
+        motivos.append("SIN_UPLIFT_VS_OBJETIVO")
+    if resultado.uplift_top25_vs_estimadas is None or resultado.uplift_top25_vs_estimadas <= 0:
+        motivos.append("SIN_UPLIFT_VS_ESTIMADAS")
+
+    folds_positivos = sum(
+        1 for f in resultado.folds
+        if (_uplift_fold(f.predicciones) is not None and _uplift_fold(f.predicciones) > 0)
+    )
+    if folds_positivos < FOLDS_MINIMOS_CON_UPLIFT_POSITIVO:
+        motivos.append("UPLIFT_INESTABLE_ENTRE_FOLDS")
+
+    if (resultado.uplift_cross_section_medio is None
+            or resultado.uplift_cross_section_medio <= UPLIFT_CROSS_SECTION_MINIMO):
+        motivos.append("SIN_UPLIFT_CROSS_SECTION")
+    if (resultado.fraccion_timestamps_uplift_positivo is None
+            or resultado.fraccion_timestamps_uplift_positivo
+            < FRACCION_TIMESTAMPS_UPLIFT_POSITIVO_MINIMA):
+        motivos.append("CROSS_SECTION_INESTABLE_TIMESTAMPS")
+    if resultado.n_meses_cross_section < MESES_CROSS_SECTION_MINIMOS:
+        motivos.append("COBERTURA_MENSUAL_CROSS_SECTION_INSUFICIENTE")
+    if resultado.meses_uplift_positivo < MESES_CROSS_SECTION_UPLIFT_POSITIVO_MINIMOS:
+        motivos.append("UPLIFT_CROSS_SECTION_INESTABLE_MENSUAL")
+
+    folds_cs_positivos = sum(
+        1 for f in resultado.folds
+        if (_uplift_cross_section_fold(f.predicciones) is not None
+            and _uplift_cross_section_fold(f.predicciones) > 0)
+    )
+    if folds_cs_positivos < FOLDS_MINIMOS_CON_UPLIFT_POSITIVO:
+        motivos.append("UPLIFT_CROSS_SECTION_INESTABLE_FOLDS")
+
+    return not motivos, tuple(motivos), folds_positivos, folds_cs_positivos
+
+
+def _indice_adyacente(valores: Sequence[int], a: int, b: int) -> bool:
+    """True solo si a/b son vecinos inmediatos en la grilla predeclarada."""
+    try:
+        ia, ib = tuple(valores).index(a), tuple(valores).index(b)
+    except ValueError:
+        return False
+    return abs(ia - ib) == 1
+
+
+def _dimension_vecina(
+    a: ConfiguracionCeldas,
+    b: ConfiguracionCeldas,
+) -> Optional[str]:
+    """Dimension cambiada si a/b son vecinos locales comparables; si no None."""
+    if a.horizonte_horas != b.horizonte_horas:
+        return None
+    if (a.min_symbols, a.min_timestamps, a.fase_horas) != (
+            b.min_symbols, b.min_timestamps, b.fase_horas):
+        return None
+
+    cambios = []
+    if a.n_bins != b.n_bins:
+        if not _indice_adyacente(N_BINS_CANDIDATOS, a.n_bins, b.n_bins):
+            return None
+        cambios.append("n_bins")
+    if a.min_muestras != b.min_muestras:
+        if not _indice_adyacente(
+                MIN_MUESTRAS_CANDIDATAS, a.min_muestras, b.min_muestras):
+            return None
+        cambios.append("min_muestras")
+    if a.max_radio != b.max_radio:
+        if not _indice_adyacente(
+                MAX_RADIOS_CANDIDATOS, a.max_radio, b.max_radio):
+            return None
+        cambios.append("max_radio")
+    return cambios[0] if len(cambios) == 1 else None
+
+
+def _marcar_robustez_grid(
+    resultados: Sequence[ResultadoConfiguracionFalsacion],
+) -> Tuple[ResultadoConfiguracionFalsacion, ...]:
+    """Marca estabilidad local sin mirar magnitud de performance."""
+    rs = tuple(resultados)
+    aprobadas = tuple(r for r in rs if r.supera_criterios_minimos)
+    salida = []
+    for r in rs:
+        dimensiones = set()
+        if r.supera_criterios_minimos:
+            for otra in aprobadas:
+                if otra is r:
+                    continue
+                d = _dimension_vecina(r.configuracion, otra.configuracion)
+                if d:
+                    dimensiones.add(d)
+        dims = tuple(sorted(dimensiones))
+        salida.append(replace(
+            r,
+            robusta_grid=len(dimensiones) >= MIN_DIMENSIONES_VECINAS_ROBUSTAS,
+            dimensiones_vecinas_robustas=dims,
+        ))
+    return tuple(salida)
+
+
+def evaluar_validacion_predeclarada(
+    observaciones: Iterable[ObservacionEdge],
+    *,
+    configuraciones: Sequence[ConfiguracionCeldas] | None = None,
+) -> ResultadoValidacionFalsacion:
+    """Evalua SOLO desarrollo (<2026). Nunca consulta/usa labels de TEST."""
+    desarrollo = tuple(sorted(
+        (o for o in observaciones if o.estado.timestamp_ms < CORTE_TEST_MS),
+        key=lambda o: (o.estado.timestamp_ms, o.estado.symbol)))
+    configs = tuple(configuraciones_predeclaradas() if configuraciones is None else configuraciones)
+    resultados = []
+
+    for c in configs:
+        r = evaluar_walk_forward_celdas(
+            desarrollo,
+            horizonte_horas=c.horizonte_horas,
+            n_bins=c.n_bins,
+            min_muestras=c.min_muestras,
+            min_symbols=c.min_symbols,
+            min_timestamps=c.min_timestamps,
+            max_radio=c.max_radio,
+            folds=FOLDS_VALIDACION_2025,
+            embargo_horas=c.horizonte_horas,
+            fase_horas=c.fase_horas,
+        )
+        pasa, motivos, folds_positivos, folds_cs_positivos = _aplicar_criterios(r)
+        resultados.append(ResultadoConfiguracionFalsacion(
+            configuracion=c, resultado=r,
+            folds_con_uplift_positivo=folds_positivos,
+            folds_cross_section_positivos=folds_cs_positivos,
+            supera_criterios_minimos=pasa,
+            motivos_rechazo=motivos,
+        ))
+
+    resultados_robustos = _marcar_robustez_grid(resultados)
+    return ResultadoValidacionFalsacion(
+        n_observaciones_desarrollo=len(desarrollo),
+        n_configuraciones=len(resultados_robustos),
+        resultados=resultados_robustos,
+    )
