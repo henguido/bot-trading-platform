@@ -72,3 +72,27 @@ jobs:
       - name: Frontend build
         working-directory: frontend
         run: npm run build
+
+      - name: Assert v6 keeps 2026 closed
+        run: |
+          python - <<'PY'
+          from backend.economia.protocolo_edge_v6 import (
+              VALIDACION_2026_ABIERTA_V6,
+              TEST_MAY_JUL_ABIERTO_V6,
+          )
+          assert VALIDACION_2026_ABIERTA_V6 is False
+          assert TEST_MAY_JUL_ABIERTO_V6 is False
+          print("v6 locks OK")
+          PY
+
+      - name: Run offline v6 rebound diagnostic
+        run: python scripts/run_edge_rebote_v6.py
+
+      - name: Upload v6 diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-rebote-v6-desarrollo-2025
+          path: artifacts/edge-rebote-v6-desarrollo-2025.json
+          if-no-files-found: warn
+          retention-days: 7
