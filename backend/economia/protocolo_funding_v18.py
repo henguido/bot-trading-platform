@@ -29,9 +29,10 @@ MIN_SIMBOLOS_COBERTURA_APTA_V18 = 15
 FRACCION_DIAS_CROSS_SECTION_COMPLETA_MIN_V18 = Decimal("0.95")
 FRACCION_DIAS_CROSS_SECTION_COMPLETA_MIN_POR_ANIO_V18 = Decimal("0.90")
 
-# Endpoint público oficial; paginación ascendente, máximo 1000 registros.
-FUNDING_URL_V18 = "https://fapi.binance.com/fapi/v1/fundingRate"
-LIMITE_PAGINA_V18 = 1000
+# Binance Vision publica fundingRate solo en archivos mensuales. El primer
+# intento de transporte vía fapi.binance.com resultó inaccesible desde el
+# runner de GitHub; cambiar a este mirror no altera ninguna hipótesis económica.
+ARCHIVO_BASE_FUNDING_V18 = "https://data.binance.vision/data/futures/um/monthly/fundingRate"
 TIMEOUT_V18_SEGUNDOS = 20
 
 DESARROLLO_2026_ABIERTO_V18 = False
