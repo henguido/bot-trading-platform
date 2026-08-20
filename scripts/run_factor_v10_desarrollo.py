@@ -41,9 +41,10 @@ def jsonable(x):
 
 def descargar_series():
     series, manifest = {}, []
+    binance = BinanceConnector()
     for symbol in UNIVERSO_VALIDACION_V2:
         primaria = descargar_klines_rango(
-            BinanceConnector(), symbol, interval=INTERVALO_KLINE,
+            binance, symbol, interval=INTERVALO_KLINE,
             start_ms=DATASET_DESDE_MS, end_ms=FIN_2025_MS - 1, limit=1000,
         )
         usada = primaria
