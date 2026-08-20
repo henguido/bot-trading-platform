@@ -31,6 +31,7 @@ from backend.economia.protocolo_edge_v11 import (
     HURDLE_ECONOMICO_BPS_V11,
     TEST_MAY_JUL_ABIERTO_V11,
 )
+from backend.economia.replica_rmom3_v11b import replicar_rmom3_v11b
 
 SALIDA = RAIZ / "artifacts" / "momentum-v11-desarrollo-2025.json"
 FIN_2025_MS = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
@@ -109,6 +110,27 @@ def compactar(r):
     }
 
 
+def compactar_replica(r):
+    return {
+        "year": r.year,
+        "n_timestamps": r.n_timestamps,
+        "spread_medio_bps": r.spread_medio_bps,
+        "fraccion_spread_positivo": r.fraccion_spread_positivo,
+        "meses_spread_positivos": r.meses_spread_positivos,
+        "folds_spread_positivos": r.folds_spread_positivos,
+        "retorno_top1_neto_medio_bps": r.retorno_top1_neto_medio_bps,
+        "fraccion_top1_neto_positivo": r.fraccion_top1_neto_positivo,
+        "n_meses_top1": r.n_meses_top1,
+        "meses_top1_netos_positivos": r.meses_top1_netos_positivos,
+        "n_folds_top1": r.n_folds_top1,
+        "folds_top1_netos_positivos": r.folds_top1_netos_positivos,
+        "spread_apto": r.spread_apto,
+        "top1_apto": r.top1_apto,
+        "apto": r.apto,
+        "motivos_rechazo": list(r.motivos_rechazo),
+    }
+
+
 def main() -> int:
     end_ms = FIN_2025_MS - 1
     assert DESARROLLO_2026_ABIERTO_V11 is False
@@ -150,6 +172,7 @@ def main() -> int:
             "factores_prometedores": [],
             "clasificaciones": [],
             "resultados": [],
+            "replica_rmom3_v11b": None,
         })
     else:
         d = diagnosticar_momentum_v11(observaciones)
@@ -167,6 +190,17 @@ def main() -> int:
         print(
             f"[04B-v11] {status}: utiles={len(symbols)} "
             f"timestamps={d.n_timestamps} prometedores={d.factores_prometedores}"
+        )
+
+        replica = replicar_rmom3_v11b(observaciones)
+        reporte["replica_rmom3_v11b"] = {
+            "anios_aptos": replica.anios_aptos,
+            "replica_consistente": replica.replica_consistente,
+            "anuales": [compactar_replica(r) for r in replica.anuales],
+        }
+        print(
+            f"[04B-v11b] RMOM3 replica: anios_aptos={replica.anios_aptos}/3 "
+            f"consistente={replica.replica_consistente}"
         )
 
     SALIDA.write_text(json.dumps(jsonable(reporte), indent=2, ensure_ascii=False), encoding="utf-8")
