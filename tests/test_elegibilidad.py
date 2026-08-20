@@ -510,6 +510,8 @@ def ciclo(monkeypatch):
     capital = {"v": 20.0}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
+    monkeypatch.setattr(settings, "LIMITE_ASIGNACION_POR_OPERACION", 0.02)
+    monkeypatch.setattr(main.motor_riesgo, "limite_asignacion", 0.02)
     monkeypatch.setattr(main.time, "sleep", lambda _s: None)
     monkeypatch.setattr(ac.simulator, "positions", {}, raising=False)
 
