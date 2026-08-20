@@ -20,13 +20,13 @@ from backend.economia.protocolo_edge_v2 import (
     UNIVERSO_VALIDACION_V2, VALIDACION_DESDE_MS,
 )
 from backend.economia.protocolo_edge_v4 import MIN_SYMBOLS_DATASET_VALIDACION_V4
-from backend.economia.protocolo_edge_v8 import FIN_2025_MS
 from backend.economia.protocolo_edge_v10 import (
     DESARROLLO_2026_ABIERTO_V10, FACTORES_V10, HORIZONTE_HORAS_V10,
     HURDLE_ECONOMICO_BPS_V10, TEST_MAY_JUL_ABIERTO_V10,
 )
 
 SALIDA = RAIZ / "artifacts" / "factores-v10-desarrollo-2025.json"
+CORTE_DESARROLLO_V10_MS = VALIDACION_DESDE_MS - 1
 
 
 def jsonable(x):
@@ -45,7 +45,7 @@ def descargar_series():
     for symbol in UNIVERSO_VALIDACION_V2:
         primaria = descargar_klines_rango(
             binance, symbol, interval=INTERVALO_KLINE,
-            start_ms=DATASET_DESDE_MS, end_ms=FIN_2025_MS - 1, limit=1000,
+            start_ms=DATASET_DESDE_MS, end_ms=CORTE_DESARROLLO_V10_MS, limit=1000,
         )
         usada = primaria
         error_primaria = None
@@ -53,7 +53,7 @@ def descargar_series():
             error_primaria = primaria.error
             usada = descargar_klines_data_api(
                 symbol, interval=INTERVALO_KLINE,
-                start_ms=DATASET_DESDE_MS, end_ms=FIN_2025_MS - 1, limit=1000,
+                start_ms=DATASET_DESDE_MS, end_ms=CORTE_DESARROLLO_V10_MS, limit=1000,
             )
         if usada.completa:
             series[symbol] = usada.velas
@@ -91,7 +91,7 @@ def compactar(r):
 
 
 def main() -> int:
-    end_ms = FIN_2025_MS - 1
+    end_ms = CORTE_DESARROLLO_V10_MS
     assert DESARROLLO_2026_ABIERTO_V10 is False
     assert TEST_MAY_JUL_ABIERTO_V10 is False
     assert end_ms < VALIDACION_DESDE_MS and end_ms < TEST_DESDE_MS
