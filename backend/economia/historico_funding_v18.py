@@ -1,15 +1,18 @@
-"""Adquisición OFFLINE de funding USD-M para BOT 2.0-04B-v18."""
+"""Adquisición OFFLINE de funding USD-M desde Binance Vision para v18."""
 from __future__ import annotations
 
+import csv
+import io
+import zipfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Optional, Tuple
 
 import requests
 
 from backend.economia.protocolo_funding_v18 import (
-    FUNDING_URL_V18,
-    LIMITE_PAGINA_V18,
+    ARCHIVO_BASE_FUNDING_V18,
     TIMEOUT_V18_SEGUNDOS,
 )
 
@@ -18,17 +21,20 @@ from backend.economia.protocolo_funding_v18 import (
 class EventoFundingV18:
     symbol: str
     funding_time_ms: int
+    funding_interval_hours: int
     funding_rate: Decimal
 
 
 @dataclass(frozen=True)
-class DescargaFundingV18:
+class DescargaFundingMesV18:
     symbol: str
+    year: int
+    month: int
     eventos: Tuple[EventoFundingV18, ...]
     completa: bool
-    n_requests: int
     status_http: Optional[int]
     error: Optional[str]
+    url: str
 
 
 def _decimal_finito(valor: Any, nombre: str) -> Decimal:
@@ -41,32 +47,35 @@ def _decimal_finito(valor: Any, nombre: str) -> Decimal:
     return d
 
 
-def parsear_funding_v18(
-    payload: Sequence[Mapping[str, Any]],
-    *,
-    symbol_esperado: str,
-    desde_ms: int,
-    hasta_exclusivo_ms: int,
-) -> Tuple[EventoFundingV18, ...]:
-    if isinstance(payload, (str, bytes)) or not isinstance(payload, Sequence):
-        raise ValueError("payload funding debe ser lista")
+def _url(symbol: str, year: int, month: int) -> str:
+    archivo = f"{symbol}-fundingRate-{year:04d}-{month:02d}.zip"
+    return f"{ARCHIVO_BASE_FUNDING_V18}/{symbol}/{archivo}"
+
+
+def parsear_funding_csv_v18(contenido: bytes, *, symbol: str) -> Tuple[EventoFundingV18, ...]:
+    """Parsea calc_time, funding_interval_hours, last_funding_rate con/sin header."""
     eventos = []
     vistos = set()
     anterior = None
-    for item in payload:
-        if not isinstance(item, Mapping):
-            raise ValueError("item funding invalido")
-        symbol = str(item.get("symbol", ""))
-        if symbol != symbol_esperado:
-            raise ValueError("symbol funding inesperado")
+    for fila in csv.reader(io.StringIO(contenido.decode("utf-8-sig"))):
+        if not fila:
+            continue
+        primer = fila[0].strip().lower()
+        if primer in {"calc_time", "calc time"}:
+            continue
+        if len(fila) < 3:
+            raise ValueError("fila funding incompleta")
         try:
-            ts = int(item["fundingTime"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("fundingTime invalido") from exc
-        if ts < desde_ms or ts >= hasta_exclusivo_ms:
-            raise ValueError("fundingTime fuera de rango")
+            ts = int(fila[0])
+            intervalo = int(fila[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("timestamp/intervalo funding invalido") from exc
+        if ts < 0:
+            raise ValueError("calc_time invalido")
+        if intervalo <= 0:
+            raise ValueError("funding_interval_hours invalido")
         if ts in vistos:
-            raise ValueError("fundingTime duplicado")
+            raise ValueError("calc_time duplicado")
         if anterior is not None and ts <= anterior:
             raise ValueError("funding no ascendente")
         vistos.add(ts)
@@ -75,83 +84,65 @@ def parsear_funding_v18(
             EventoFundingV18(
                 symbol=symbol,
                 funding_time_ms=ts,
-                funding_rate=_decimal_finito(item.get("fundingRate"), "fundingRate"),
+                funding_interval_hours=intervalo,
+                funding_rate=_decimal_finito(fila[2], "last_funding_rate"),
             )
         )
     return tuple(eventos)
 
 
-def descargar_funding_rango_v18(
+def _limites_mes_ms(year: int, month: int) -> tuple[int, int]:
+    inicio = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        fin = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        fin = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return int(inicio.timestamp() * 1000), int(fin.timestamp() * 1000)
+
+
+def descargar_funding_mes_v18(
     symbol: str,
-    desde_ms: int,
-    hasta_exclusivo_ms: int,
+    year: int,
+    month: int,
     *,
     http_get=None,
     timeout_segundos: int = TIMEOUT_V18_SEGUNDOS,
-    limite: int = LIMITE_PAGINA_V18,
-) -> DescargaFundingV18:
-    """Descarga rango completo con paginación ascendente y sin prefijo parcial."""
+) -> DescargaFundingMesV18:
     if not isinstance(symbol, str) or not symbol.isalnum():
         raise ValueError("symbol invalido")
-    if isinstance(desde_ms, bool) or not isinstance(desde_ms, int):
-        raise ValueError("desde_ms invalido")
-    if isinstance(hasta_exclusivo_ms, bool) or not isinstance(hasta_exclusivo_ms, int) or hasta_exclusivo_ms <= desde_ms:
-        raise ValueError("hasta_exclusivo_ms invalido")
+    if isinstance(year, bool) or not isinstance(year, int) or not 2020 <= year <= 2100:
+        raise ValueError("year invalido")
+    if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
+        raise ValueError("month invalido")
     if isinstance(timeout_segundos, bool) or not isinstance(timeout_segundos, int) or timeout_segundos <= 0:
         raise ValueError("timeout invalido")
-    if isinstance(limite, bool) or not isinstance(limite, int) or not 1 <= limite <= 1000:
-        raise ValueError("limite invalido")
 
+    url = _url(symbol, year, month)
     get = requests.get if http_get is None else http_get
-    cursor = desde_ms
-    acumulados = []
-    vistos = set()
-    n_requests = 0
-    ultimo_status = None
+    r = None
     try:
-        while cursor < hasta_exclusivo_ms:
-            params = {
-                "symbol": symbol,
-                "startTime": cursor,
-                "endTime": hasta_exclusivo_ms - 1,
-                "limit": limite,
-            }
-            n_requests += 1
-            r = get(FUNDING_URL_V18, params=params, timeout=timeout_segundos)
-            ultimo_status = int(r.status_code)
-            r.raise_for_status()
-            payload = r.json()
-            if not isinstance(payload, list):
-                raise ValueError("respuesta funding no es lista")
-            if not payload:
-                break
-            pagina = parsear_funding_v18(
-                payload,
-                symbol_esperado=symbol,
-                desde_ms=cursor,
-                hasta_exclusivo_ms=hasta_exclusivo_ms,
-            )
-            if not pagina:
-                break
-            for evento in pagina:
-                if evento.funding_time_ms in vistos:
-                    raise ValueError("funding duplicado entre paginas")
-                vistos.add(evento.funding_time_ms)
-                acumulados.append(evento)
-            ultimo_ts = pagina[-1].funding_time_ms
-            siguiente = ultimo_ts + 1
-            if siguiente <= cursor:
-                raise ValueError("paginacion funding no avanza")
-            cursor = siguiente
-            if len(payload) < limite:
-                break
-        return DescargaFundingV18(symbol, tuple(acumulados), True, n_requests, ultimo_status, None)
+        r = get(url, timeout=timeout_segundos)
+        status = int(r.status_code)
+        if status == 404:
+            return DescargaFundingMesV18(symbol, year, month, (), False, 404, "NO_ENCONTRADO", url)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            nombres = [n for n in zf.namelist() if not n.endswith("/")]
+            if len(nombres) != 1:
+                raise ValueError("ZIP funding debe contener exactamente un archivo")
+            eventos = parsear_funding_csv_v18(zf.read(nombres[0]), symbol=symbol)
+        desde_ms, hasta_ms = _limites_mes_ms(year, month)
+        if any(not (desde_ms <= e.funding_time_ms < hasta_ms) for e in eventos):
+            raise ValueError("evento funding fuera del mes solicitado")
+        return DescargaFundingMesV18(symbol, year, month, eventos, True, status, None, url)
     except Exception as exc:
-        return DescargaFundingV18(
+        return DescargaFundingMesV18(
             symbol=symbol,
+            year=year,
+            month=month,
             eventos=(),
             completa=False,
-            n_requests=n_requests,
-            status_http=ultimo_status,
+            status_http=getattr(r, "status_code", None),
             error=f"{type(exc).__name__}: {exc}",
+            url=url,
         )
