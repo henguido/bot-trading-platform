@@ -73,26 +73,26 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Assert v13 keeps 2026 closed
+      - name: Assert v14 keeps 2026 closed
         run: |
           python - <<'PY'
-          from backend.economia.protocolo_portfolio_v13 import (
-              DESARROLLO_2026_ABIERTO_V13,
-              TEST_MAY_JUL_ABIERTO_V13,
+          from backend.economia.protocolo_derivados_v14 import (
+              DESARROLLO_2026_ABIERTO_V14,
+              TEST_MAY_JUL_ABIERTO_V14,
           )
-          assert DESARROLLO_2026_ABIERTO_V13 is False
-          assert TEST_MAY_JUL_ABIERTO_V13 is False
-          print("v13 locks OK")
+          assert DESARROLLO_2026_ABIERTO_V14 is False
+          assert TEST_MAY_JUL_ABIERTO_V14 is False
+          print("v14 locks OK")
           PY
 
-      - name: Run offline v13 regime-gated portfolio diagnostic
-        run: python scripts/run_portfolio_v13_desarrollo.py
+      - name: Run offline v14 derivatives data audit
+        run: python scripts/run_derivatives_audit_v14.py
 
-      - name: Upload v13 diagnostic
+      - name: Upload v14 audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: portfolio-v13-regime-gated-2022-2025
-          path: artifacts/portfolio-v13-regime-gated-2022-2025.json
+          name: derivatives-data-audit-v14-2022-2025
+          path: artifacts/derivatives-data-audit-v14-2022-2025.json
           if-no-files-found: warn
           retention-days: 7
