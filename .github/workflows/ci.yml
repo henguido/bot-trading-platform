@@ -73,26 +73,26 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Assert v9 keeps 2026 closed
+      - name: Assert v10 keeps 2026 closed
         run: |
           python - <<'PY'
-          from backend.economia.protocolo_edge_v9 import (
-              DESARROLLO_2026_ABIERTO_V9,
-              TEST_MAY_JUL_ABIERTO_V9,
+          from backend.economia.protocolo_edge_v10 import (
+              DESARROLLO_2026_ABIERTO_V10,
+              TEST_MAY_JUL_ABIERTO_V10,
           )
-          assert DESARROLLO_2026_ABIERTO_V9 is False
-          assert TEST_MAY_JUL_ABIERTO_V9 is False
-          print("v9 locks OK")
+          assert DESARROLLO_2026_ABIERTO_V10 is False
+          assert TEST_MAY_JUL_ABIERTO_V10 is False
+          print("v10 locks OK")
           PY
 
-      - name: Run offline v9 factor diagnostic
-        run: python scripts/run_factor_v9_desarrollo.py
+      - name: Run offline v10 factor diagnostic
+        run: python scripts/run_factor_v10_desarrollo.py
 
-      - name: Upload v9 diagnostic
+      - name: Upload v10 diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: factores-v9-desarrollo-2025
-          path: artifacts/factores-v9-desarrollo-2025.json
+          name: factores-v10-desarrollo-2025
+          path: artifacts/factores-v10-desarrollo-2025.json
           if-no-files-found: warn
           retention-days: 7
