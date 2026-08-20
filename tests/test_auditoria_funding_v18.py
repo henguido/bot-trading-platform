@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 
 from backend.economia.auditoria_funding_v18 import auditar_funding_v18
@@ -11,8 +10,8 @@ _DIA_MS = 86_400_000
 _HORA_MS = 3_600_000
 
 
-def _evento(symbol: str, ts: int, rate: str = "0.0001"):
-    return EventoFundingV18(symbol, ts, Decimal(rate))
+def _evento(symbol: str, ts: int, rate: str = "0.0001", intervalo: int = 8):
+    return EventoFundingV18(symbol, ts, intervalo, Decimal(rate))
 
 
 def _serie_diaria(symbol: str, n_dias: int):
@@ -57,18 +56,17 @@ def test_duplicado_no_se_oculta_en_cobertura_diaria():
     assert c.apto is False
 
 
-def test_intervalos_8h_y_4h_se_reportan_sin_imponer_cadencia_fija():
+def test_intervalos_publicados_8h_y_4h_se_reportan_sin_inferir_cadencia():
     symbol = UNIVERSO_FUNDING_V18[0]
     base = int(DESDE_V18.timestamp() * 1000)
     eventos = (
-        _evento(symbol, base + 6),
-        _evento(symbol, base + 8 * _HORA_MS + 9),
-        _evento(symbol, base + 12 * _HORA_MS + 13),
+        _evento(symbol, base + 6, intervalo=8),
+        _evento(symbol, base + 8 * _HORA_MS + 9, intervalo=4),
+        _evento(symbol, base + 12 * _HORA_MS + 13, intervalo=4),
     )
     audit = auditar_funding_v18({symbol: eventos})
     intervalos = dict(audit.simbolos[0].intervalos_horas)
-    assert intervalos["8"] == 1
-    assert intervalos["4"] == 1
+    assert intervalos == {"4": 2, "8": 1}
 
 
 def test_gap_mayor_24h_es_visible_pero_no_se_rellena():
