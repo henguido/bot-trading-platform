@@ -73,26 +73,26 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Assert v17 keeps 2026 closed
+      - name: Assert v18 keeps 2026 closed
         run: |
           python - <<'PY'
-          from backend.economia.protocolo_basis_v17 import (
-              DESARROLLO_2026_ABIERTO_V17,
-              TEST_MAY_JUL_ABIERTO_V17,
+          from backend.economia.protocolo_funding_v18 import (
+              DESARROLLO_2026_ABIERTO_V18,
+              TEST_MAY_JUL_ABIERTO_V18,
           )
-          assert DESARROLLO_2026_ABIERTO_V17 is False
-          assert TEST_MAY_JUL_ABIERTO_V17 is False
-          print("v17 locks OK")
+          assert DESARROLLO_2026_ABIERTO_V18 is False
+          assert TEST_MAY_JUL_ABIERTO_V18 is False
+          print("v18 locks OK")
           PY
 
-      - name: Run offline v17 perpetual basis diagnostic
-        run: python scripts/run_basis_v17_desarrollo.py
+      - name: Run offline v18 funding data audit
+        run: python scripts/run_funding_audit_v18.py
 
-      - name: Upload v17 diagnostic
+      - name: Upload v18 audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: basis-v17-desarrollo-2022-2025
-          path: artifacts/basis-v17-desarrollo-2022-2025.json
+          name: funding-data-audit-v18-2022-2025
+          path: artifacts/funding-data-audit-v18-2022-2025.json
           if-no-files-found: warn
           retention-days: 7
