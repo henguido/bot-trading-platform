@@ -146,7 +146,8 @@ No se usan retornos diarios para seleccionar periodos.
 3. existe timestamp de funding duplicado;
 4. existe evento fuera de 2022-2025;
 5. precio/mark no positivo o no finito;
-6. falta cualquiera de los cuatro años en BTC o ETH.
+6. falta cualquiera de los cuatro años en BTC o ETH;
+7. existe un salto entre settlements alineados que no coincide con el `funding_interval_hours` publicado para el settlement final.
 
 Sin imputación.
 
