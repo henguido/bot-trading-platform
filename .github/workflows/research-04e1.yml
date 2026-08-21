@@ -1,0 +1,89 @@
+name: research-04e1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/protocolo_spot_quarterly_04e1.py'
+      - 'backend/economia/spot_quarterly_04e1.py'
+      - 'backend/economia/data/spot_quarterly_04e1_delivery_prices.json'
+      - 'scripts/run_spot_quarterly_04e1.py'
+      - 'tests/test_spot_quarterly_04e1.py'
+      - 'docs/investigacion/04E-1-spot-quarterly-carry.md'
+      - '.github/workflows/research-04e1.yml'
+
+jobs:
+  spot-quarterly-04e1:
+    if: github.head_ref == 'agent/bot-2.0-04e1-spot-quarterly-carry'
+    runs-on: ubuntu-24.04
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04e1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04E-1 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from decimal import Decimal
+          from backend.economia.protocolo_spot_quarterly_04e1 import (
+              SIMBOLOS_04E1, ANIOS_04E1, DIAS_HOLD_04E1,
+              DRAG_POR_TRADE_04E1, UMBRAL_BASIS_NET_04E1,
+              CAPITAL_REFERENCIA_MULTIPLO_04E1,
+              MEDIA_ANUAL_PROD_MIN_04E1, PEOR_ANIO_PROD_MIN_04E1,
+              SHARPE_TRIMESTRAL_PROD_MIN_04E1, MAX_DRAWDOWN_PROD_04E1,
+              MAX_STRESS_INTRATRADE_PROD_04E1, WIN_RATE_PROD_MIN_04E1,
+              DESARROLLO_2026_ABIERTO_04E1, IMPUTACION_PERMITIDA_04E1,
+              LEVERAGE_ADICIONAL_PERMITIDO_04E1,
+              OPTIMIZACION_HORIZONTE_PERMITIDA_04E1,
+              CAMBIO_COSTE_RETROSPECTIVO_04E1, CAMBIO_SIGNO_RETROSPECTIVO_04E1,
+          )
+          assert SIMBOLOS_04E1 == ('BTCUSDT', 'ETHUSDT')
+          assert ANIOS_04E1 == (2022, 2023, 2024, 2025)
+          assert DIAS_HOLD_04E1 == 28
+          assert DRAG_POR_TRADE_04E1 == Decimal('0.006')
+          assert UMBRAL_BASIS_NET_04E1 == Decimal('0')
+          assert CAPITAL_REFERENCIA_MULTIPLO_04E1 == Decimal('1')
+          assert MEDIA_ANUAL_PROD_MIN_04E1 == Decimal('0.05')
+          assert PEOR_ANIO_PROD_MIN_04E1 == Decimal('0.02')
+          assert SHARPE_TRIMESTRAL_PROD_MIN_04E1 == Decimal('1.5')
+          assert MAX_DRAWDOWN_PROD_04E1 == Decimal('0.075')
+          assert MAX_STRESS_INTRATRADE_PROD_04E1 == Decimal('0.075')
+          assert WIN_RATE_PROD_MIN_04E1 == Decimal('0.60')
+          assert DESARROLLO_2026_ABIERTO_04E1 is False
+          assert IMPUTACION_PERMITIDA_04E1 is False
+          assert LEVERAGE_ADICIONAL_PERMITIDO_04E1 is False
+          assert OPTIMIZACION_HORIZONTE_PERMITIDA_04E1 is False
+          assert CAMBIO_COSTE_RETROSPECTIVO_04E1 is False
+          assert CAMBIO_SIGNO_RETROSPECTIVO_04E1 is False
+          print('04E-1 methodology locks OK')
+          PY
+          grep -q 'PREDECLARADO ANTES DE PnL 04E-1' docs/investigacion/04E-1-spot-quarterly-carry.md
+          grep -q '60 bps por trade' docs/investigacion/04E-1-spot-quarterly-carry.md
+          grep -q '2026 cerrado' docs/investigacion/04E-1-spot-quarterly-carry.md
+      - name: Unit tests 04E-1
+        run: pytest -q tests/test_spot_quarterly_04e1.py
+      - name: Run fixed spot-quarterly replication
+        run: python scripts/run_spot_quarterly_04e1.py
+      - name: Upload 04E-1 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: spot-quarterly-04e1-2022-2025
+          path: artifacts/spot-quarterly-04e1-2022-2025.json
+          retention-days: 14
