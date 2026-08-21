@@ -57,16 +57,20 @@ OPTIMIZACION_LOOKBACK_PERMITIDA_04C3 = False
 CAMBIO_DE_SIGNO_RETROSPECTIVO_04C3 = False
 
 
-def tercer_viernes(year: int, month: int) -> datetime:
-    """Tercer viernes del mes a las 08:00 UTC, convención Binance trimestral."""
-    first = datetime(year, month, 1, 8, tzinfo=timezone.utc)
-    offset = (4 - first.weekday()) % 7
-    return first + timedelta(days=offset + 14)
+def ultimo_viernes(year: int, month: int) -> datetime:
+    """Último viernes del mes a las 08:00 UTC, convención Binance trimestral."""
+    if month == 12:
+        first_next = datetime(year + 1, 1, 1, 8, tzinfo=timezone.utc)
+    else:
+        first_next = datetime(year, month + 1, 1, 8, tzinfo=timezone.utc)
+    last_day = first_next - timedelta(days=1)
+    backwards = (last_day.weekday() - 4) % 7
+    return last_day - timedelta(days=backwards)
 
 
 def expiries_04c3() -> tuple[datetime, ...]:
     return tuple(
-        tercer_viernes(year, month)
+        ultimo_viernes(year, month)
         for year in ANIOS_04C3
         for month in (3, 6, 9, 12)
     )
