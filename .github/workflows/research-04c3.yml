@@ -1,0 +1,97 @@
+name: research-04c3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/protocolo_calendar_04c3.py'
+      - 'backend/economia/calendar_spread_04c3.py'
+      - 'backend/economia/data/calendar_04c3_delivery_prices.json'
+      - 'scripts/run_calendar_spread_04c3.py'
+      - 'tests/test_calendar_spread_04c3.py'
+      - 'docs/investigacion/04C-3-calendar-spread.md'
+      - '.github/workflows/research-04c3.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-04c3-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  calendar-spread-04c3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04c3
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04C-3 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from backend.economia.protocolo_calendar_04c3 import (
+              SIMBOLOS_04C3, ANIOS_04C3, DIAS_HOLD_04C3, DIAS_LOOKBACK_FUNDING_04C3,
+              DRAG_POR_TRADE_04C3, CAPITAL_REFERENCIA_MULTIPLO_04C3,
+              UMBRAL_PREDICTED_NET_04C3, FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C3,
+              MEDIA_ANUAL_PROD_MIN_04C3, PEOR_ANIO_PROD_MIN_04C3,
+              SHARPE_TRIMESTRAL_PROD_MIN_04C3, MAX_DRAWDOWN_PROD_04C3,
+              MAX_STRESS_INTRATRADE_PROD_04C3, WIN_RATE_PROD_MIN_04C3,
+              DESARROLLO_2026_ABIERTO_04C3, IMPUTACION_PERMITIDA_04C3,
+              LEVERAGE_ADICIONAL_PERMITIDO_04C3, OPTIMIZACION_LOOKBACK_PERMITIDA_04C3,
+              CAMBIO_DE_SIGNO_RETROSPECTIVO_04C3,
+          )
+          assert SIMBOLOS_04C3 == ('BTCUSDT', 'ETHUSDT')
+          assert ANIOS_04C3 == (2022, 2023, 2024, 2025)
+          assert DIAS_HOLD_04C3 == 28 and DIAS_LOOKBACK_FUNDING_04C3 == 28
+          assert str(DRAG_POR_TRADE_04C3) == '0.006'
+          assert str(CAPITAL_REFERENCIA_MULTIPLO_04C3) == '1'
+          assert str(UMBRAL_PREDICTED_NET_04C3) == '0'
+          assert FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C3 == 1000
+          assert str(MEDIA_ANUAL_PROD_MIN_04C3) == '0.05'
+          assert str(PEOR_ANIO_PROD_MIN_04C3) == '0.02'
+          assert str(SHARPE_TRIMESTRAL_PROD_MIN_04C3) == '1.5'
+          assert str(MAX_DRAWDOWN_PROD_04C3) == '0.075'
+          assert str(MAX_STRESS_INTRATRADE_PROD_04C3) == '0.075'
+          assert str(WIN_RATE_PROD_MIN_04C3) == '0.60'
+          assert DESARROLLO_2026_ABIERTO_04C3 is False
+          assert IMPUTACION_PERMITIDA_04C3 is False
+          assert LEVERAGE_ADICIONAL_PERMITIDO_04C3 is False
+          assert OPTIMIZACION_LOOKBACK_PERMITIDA_04C3 is False
+          assert CAMBIO_DE_SIGNO_RETROSPECTIVO_04C3 is False
+          print('04C-3 methodology locks OK')
+          PY
+          grep -q 'PREDECLARADO' docs/investigacion/04C-3-calendar-spread.md
+          grep -q '60 bps se aplican por trade' docs/investigacion/04C-3-calendar-spread.md
+          grep -q 'no 2026' docs/investigacion/04C-3-calendar-spread.md
+      - name: Unit tests 04C-3
+        run: pytest -q tests/test_calendar_spread_04c3.py
+      - name: Run fixed calendar-spread replication
+        run: python scripts/run_calendar_spread_04c3.py
+      - name: Upload 04C-3 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: calendar-spread-04c3-2022-2025
+          path: artifacts/calendar-spread-04c3-2022-2025.json
+          if-no-files-found: error
+          retention-days: 14
