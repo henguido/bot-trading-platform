@@ -1,0 +1,28 @@
+{
+  "captured_at_utc": "2026-08-21T19:32:00Z",
+  "source": "Binance connected public market-data tools",
+  "method": "Same-snapshot hypothetical round-trip: buy Spot + sell USD-M, then sell Spot + buy USD-M. No orders were placed.",
+  "notionals_usd": [500, 5000, 25000, 100000],
+  "results": {
+    "BTCUSDT": [
+      {"notional_usd":500,"base_qty":"0.00646962684874439423","spot_buy_vwap":"77284.21000000","spot_sell_vwap":"77284.20000000","futures_sell_vwap":"77253.30000000","futures_buy_vwap":"77253.40000000","roundtrip_book_friction_bps":"0.01423318"},
+      {"notional_usd":5000,"base_qty":"0.06469626848744394230","spot_buy_vwap":"77284.21000000","spot_sell_vwap":"77284.20000000","futures_sell_vwap":"77253.30000000","futures_buy_vwap":"77253.40000000","roundtrip_book_friction_bps":"0.01423318"},
+      {"notional_usd":25000,"base_qty":"0.32348134243721971150","spot_buy_vwap":"77284.21000000","spot_sell_vwap":"77284.20000000","futures_sell_vwap":"77253.30000000","futures_buy_vwap":"77253.69790409","roundtrip_book_friction_bps":"0.05277975"},
+      {"notional_usd":100000,"base_qty":"1.29392536974887884602","spot_buy_vwap":"77284.21000000","spot_sell_vwap":"77284.20000000","futures_sell_vwap":"77253.30000000","futures_buy_vwap":"77254.82447602","roundtrip_book_friction_bps":"0.19854975"}
+    ],
+    "ETHUSDT": [
+      {"notional_usd":500,"base_qty":"0.20674948829593241785","spot_buy_vwap":"2418.38567109","spot_sell_vwap":"2418.35000000","futures_sell_vwap":"2415.10000000","futures_buy_vwap":"2415.11000000","roundtrip_book_friction_bps":"0.18884949"},
+      {"notional_usd":5000,"base_qty":"2.06742844921687643683","spot_buy_vwap":"2418.46338232","spot_sell_vwap":"2418.35000000","futures_sell_vwap":"2415.10000000","futures_buy_vwap":"2415.11000000","roundtrip_book_friction_bps":"0.51016824"},
+      {"notional_usd":25000,"base_qty":"10.33634219771224942848","spot_buy_vwap":"2418.65057501","spot_sell_vwap":"2418.35000000","futures_sell_vwap":"2415.10000000","futures_buy_vwap":"2415.24688582","roundtrip_book_friction_bps":"1.85004332"},
+      {"notional_usd":100000,"base_qty":"41.34110911078958247210","spot_buy_vwap":"2418.89978646","spot_sell_vwap":"2418.35000000","futures_sell_vwap":"2415.10000000","futures_buy_vwap":"2415.37702980","roundtrip_book_friction_bps":"3.41815012"}
+    ]
+  },
+  "max_roundtrip_book_friction_bps": "3.41815012",
+  "gate_bps": "10",
+  "liquidity_verdict": "EJECUCION_PUBLICA_APTA_SNAPSHOT_04D1",
+  "limitations": [
+    "Point-in-time snapshot, not a historical slippage distribution.",
+    "GitHub-hosted runner could not access fapi.binance.com due HTTP 451; connected Binance market-data tooling was used for this independent snapshot.",
+    "Fees, maintenance margin, leverage brackets and collateral haircuts are not included."
+  ]
+}
