@@ -176,3 +176,53 @@ jobs:
           path: artifacts/desapalancamiento-v22-desarrollo-2022-2025.json
           if-no-files-found: warn
           retention-days: 7
+
+  aggtrades-v23:
+    if: github.head_ref == 'agent/bot-2.0-04b23-aggtrades-data-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Assert v23 inventory locks
+        run: |
+          python - <<'PY'
+          from backend.economia.protocolo_aggtrades_v23 import (
+              DESARROLLO_2026_ABIERTO_V23,
+              TEST_MAY_JUL_ABIERTO_V23,
+              IMPUTACION_PERMITIDA_V23,
+              USA_RETORNOS_V23,
+              USA_GPT_V23,
+          )
+          assert DESARROLLO_2026_ABIERTO_V23 is False
+          assert TEST_MAY_JUL_ABIERTO_V23 is False
+          assert IMPUTACION_PERMITIDA_V23 is False
+          assert USA_RETORNOS_V23 is False
+          assert USA_GPT_V23 is False
+          print('v23 inventory locks OK')
+          PY
+
+      - name: Run offline v23 AggTrades inventory
+        run: python scripts/run_aggtrades_audit_v23.py
+
+      - name: Upload v23 inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggtrades-data-audit-v23-2022-2025
+          path: artifacts/aggtrades-data-audit-v23-2022-2025.json
+          if-no-files-found: error
+          retention-days: 7
