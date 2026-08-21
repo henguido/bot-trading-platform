@@ -2,9 +2,9 @@
 
 ## Estado
 
-**PREDECLARADO — no se ha descargado el calendario v24 ni observado su resultado económico.**
+**CERRADO — `ORDERFLOW_RESIDUAL_FALSADO_V24`.**
 
-v23 confirmó disponibilidad histórica de AggTrades; v23a validó esquema, timestamps y semántica `isBuyerMaker`; v23b fijó un calendario de 96 lunes con 1.920/1.920 ZIP disponibles y 7.617537 GiB comprimidos. v24 usa exactamente ese calendario, sin sustituir fechas.
+v23 confirmó disponibilidad histórica de AggTrades; v23a validó esquema, timestamps y semántica `isBuyerMaker`; v23b fijó un calendario de 96 lunes con 1.920/1.920 ZIP disponibles y 7.617537 GiB comprimidos. v24 usó exactamente ese calendario, sin sustituir fechas.
 
 ## Hipótesis única
 
@@ -97,7 +97,63 @@ Para aprobar v24 debe cumplirse simultáneamente:
 
 El resultado OFI crudo se conserva como diagnóstico, no como criterio que permita rescatar la hipótesis residual.
 
-## Candados
+## Resultado real
+
+Workflow `research-04b-v24`, run #5, HEAD `e42fed87ead0f0c8dbf09404cc6bf8629e874d4a`.
+
+### Transporte y cobertura
+
+- AggTrades: 1.920/1.920 completos;
+- tamaño procesado: 7.617537 GiB;
+- filas AggTrades: 558.042.118;
+- timestamps: 1.440 archivos en milisegundos y 480 en microsegundos;
+- Spot: 20/20 series completas;
+- observaciones: 1.920;
+- fechas aptas: 96/96;
+- símbolos por fecha: 20/20.
+
+Los datos fueron suficientes; el veredicto es económico, no de transporte.
+
+### Resultado agregado
+
+- retorno bruto medio señal: **+30.348654 bps**;
+- retorno neto medio tras hurdle: **+5.348654 bps**;
+- universo equal-weight: **-8.922989 bps**;
+- price-only: **-30.315812 bps**;
+- OFI crudo: **+36.756064 bps**;
+- uplift vs universo: **+39.271643 bps**;
+- uplift vs price-only: **+60.664466 bps**;
+- uplift vs OFI crudo: **-6.407410 bps**;
+- meses representados: 48;
+- meses net-positive: **21/48**;
+- años representados: 4;
+- años net-positive: **3/4**;
+- años con uplift positivo vs universo: **3/4**;
+- años con uplift positivo vs price-only: **3/4**.
+
+Motivos de rechazo predeclarados:
+
+- `FRACCION_TIMESTAMPS_NETO_POSITIVO_INSUFICIENTE`;
+- `MESES_NETO_POSITIVO_INSUFICIENTES`.
+
+### Desglose anual
+
+| Año | Neto medio | Uplift vs universo | Uplift vs price-only | Uplift vs OFI crudo |
+|---|---:|---:|---:|---:|
+| 2022 | -480.793328 bps | +47.494555 bps | +39.620389 bps | +7.103619 bps |
+| 2023 | +81.504301 bps | +30.126181 bps | +81.698990 bps | +35.264996 bps |
+| 2024 | +269.173849 bps | -10.506424 bps | -86.827031 bps | -48.395966 bps |
+| 2025 | +151.509794 bps | +89.972260 bps | +208.165516 bps | -19.602287 bps |
+
+## Interpretación final
+
+v24 no es una ausencia total de señal: la media neta fue positiva y 3/4 años fueron net-positive. Sin embargo, **no supera los gates de consistencia fijados antes del resultado**, con solo 21/48 meses net-positive y menos del 50% de timestamps net-positive. Además, el OFI crudo tuvo mayor retorno medio que la versión residual, por lo que la residualización no añadió valor agregado frente al flujo sin controlar precio.
+
+La formulación exacta **presión compradora Spot residual al movimiento contemporáneo -> retorno 7d** queda falsada bajo este protocolo. No se invertirá el signo ni se moverán fechas, percentiles, horizonte o hurdle para rescatarla.
+
+Este resultado cierra la búsqueda iterativa de variantes direccionales dentro de 04B. La siguiente fase debe partir de una metodología seleccionada primero por evidencia externa, mecanismo económico y viabilidad operativa, antes de observar resultados internos.
+
+## Candados preservados
 
 - no invertir signo;
 - no ajustar top quartile tras ver resultados;
@@ -106,9 +162,6 @@ El resultado OFI crudo se conserva como diagnóstico, no como criterio que permi
 - no cambiar hurdle;
 - no winsorizar ni clippear;
 - no imputar;
-- no Futures;
-- no OI;
-- no funding;
 - no GPT;
 - no scanner;
 - no RiskEngine;
@@ -117,7 +170,3 @@ El resultado OFI crudo se conserva como diagnóstico, no como criterio que permi
 - no Render;
 - 2026 cerrado;
 - mayo-julio 2026 cerrado.
-
-## Interpretación
-
-Si v24 falla con datos suficientes, se considera falsada esta formulación exacta de **presión compradora Spot residual al movimiento contemporáneo**. No se probará inmediatamente el signo contrario ni se moverán percentiles/horizontes dentro de la misma versión.
