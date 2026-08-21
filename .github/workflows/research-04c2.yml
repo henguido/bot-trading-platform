@@ -51,6 +51,7 @@ jobs:
           python - <<'PY'
           from backend.economia.protocolo_carry_04c2 import (
               SIMBOLOS_04C2, ANIOS_04C2, DRAG_ANUAL_NOTIONAL_04C2,
+              FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2, DAILY_ARCHIVE_FALLBACK_04C2,
               MEDIA_ANUAL_COMMITTED_PROD_MIN_04C2, PEOR_ANIO_COMMITTED_PROD_MIN_04C2,
               SHARPE_PROD_MIN_04C2, MAX_DRAWDOWN_PROD_04C2,
               DESARROLLO_2026_ABIERTO_04C2, IMPUTACION_PERMITIDA_04C2,
@@ -59,6 +60,8 @@ jobs:
           assert SIMBOLOS_04C2 == ('BTCUSDT', 'ETHUSDT')
           assert ANIOS_04C2 == (2022, 2023, 2024, 2025)
           assert str(DRAG_ANUAL_NOTIONAL_04C2) == '0.006'
+          assert FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2 == 1000
+          assert DAILY_ARCHIVE_FALLBACK_04C2 is True
           assert str(MEDIA_ANUAL_COMMITTED_PROD_MIN_04C2) == '0.05'
           assert str(PEOR_ANIO_COMMITTED_PROD_MIN_04C2) == '0.02'
           assert str(SHARPE_PROD_MIN_04C2) == '2.0'
@@ -69,8 +72,9 @@ jobs:
           assert FUNDING_POSITIVO_COMO_FILTRO_04C2 is False
           print('04C-2 methodology locks OK')
           PY
-          grep -q 'PREDECLARADO' docs/investigacion/04C-2-perpetual-funding-carry.md
+          grep -q 'parámetros económicos congelados antes' docs/investigacion/04C-2-perpetual-funding-carry.md
           grep -q 'no seleccionar solo periodos con funding positivo' docs/investigacion/04C-2-perpetual-funding-carry.md
+          grep -q 'no ampliar la tolerancia temporal >1 segundo' docs/investigacion/04C-2-perpetual-funding-carry.md
           grep -q 'no 2026' docs/investigacion/04C-2-perpetual-funding-carry.md
       - name: Unit tests 04C-2
         run: pytest -q tests/test_carry_perpetual_04c2.py
