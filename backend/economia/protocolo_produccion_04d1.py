@@ -24,7 +24,9 @@ MARGEN_FUTURES_ESTATICO_MULTIPLO_04D1 = Decimal("1")
 CAPITAL_SPOT_MULTIPLO_04D1 = Decimal("1")
 CAPITAL_TOTAL_REFERENCIA_04C2 = Decimal("2")
 
-SPOT_DEPTH_URL_04D1 = "https://api.binance.com/api/v3/depth"
+# Binance mantiene data-api.binance.vision como endpoint oficial public-market-data
+# sin autenticación; evita el geofencing HTTP 451 de api.binance.com en runners US.
+SPOT_DEPTH_URL_04D1 = "https://data-api.binance.vision/api/v3/depth"
 FUTURES_DEPTH_URL_04D1 = "https://fapi.binance.com/fapi/v1/depth"
 DEPTH_LIMIT_04D1 = 1000
 TIMEOUT_04D1_SEGUNDOS = 20
