@@ -1,18 +1,31 @@
 # BOT 2.0 — 04C-0 Auditoría de carry
 
-## Estado
+## Estado final
 
-**PREDECLARADO — auditoría de datos/instrumentos, sin PnL y sin selección por resultados internos.**
+**`DATASET_CARRY_APTO_04C0` — auditoría completada con datos suficientes. No se calculó PnL.**
 
-04B queda cerrada como familia direccional. 04C adopta un funnel literature-first. La metodología candidata prioritaria es **cash-and-carry delta-neutral**: long Spot y short Futures para capturar basis/funding, no para predecir la dirección del Spot.
+Resultado reproducible sobre Binance Public Data 2022–2025:
+
+- Spot BTCUSDT: 48/48 meses;
+- Spot ETHUSDT: 48/48 meses;
+- funding perpetual BTCUSDT: 48/48 meses;
+- funding perpetual ETHUSDT: 48/48 meses;
+- 32 futuros fechados USD-M descubiertos: 16 BTC + 16 ETH;
+- cuatro vencimientos por año y subyacente en 2022, 2023, 2024 y 2025;
+- continuidad de klines de contratos fechados: 100%;
+- cobertura de `markPriceKlines`: 100%;
+- cero motivos de rechazo;
+- inventario total usado por el gate: aproximadamente 0.012590 GiB comprimidos.
+
+Workflow válido: `research-04c0` run #1, success. CI general del mismo HEAD: run #96, **1141 tests passed**, `compileall` OK, frontend 841 módulos y v20.1 revalidada.
+
+04C-0 demuestra únicamente que la réplica histórica de cash-and-carry es técnicamente viable. No demuestra rentabilidad.
 
 ## Base externa
 
-La referencia principal es *Crypto Carry* (Schmeling, Schrimpf y Todorov; Management Science, publicado online 6-may-2026; BIS Working Paper 1087). El trabajo define el carry como la diferencia entre futuros y Spot y estudia una posición cash-and-carry long Spot / short Futures. Documenta carry promedio superior al 10% anual y episodios por encima del 40%, pero también advierte que no es una oportunidad libre de riesgo por fricciones de margen, segmentación y posibles pérdidas mark-to-market antes del vencimiento.
+La referencia principal es *Crypto Carry* (Schmeling, Schrimpf y Todorov; Management Science, publicado online 6-may-2026; BIS Working Paper 1087). El trabajo define el carry como la diferencia entre futuros y Spot y estudia una posición cash-and-carry long Spot / short Futures. Documenta una prima de carry económicamente relevante, pero también advierte que no es una oportunidad libre de riesgo por fricciones de margen, segmentación y posibles pérdidas mark-to-market antes del vencimiento.
 
-04C-0 no intenta replicar aún esos retornos. Primero verifica si Binance permite una reconstrucción histórica suficientemente fiel.
-
-## Universo fijado
+## Universo auditado
 
 - BTC y ETH únicamente;
 - Spot USDT: `BTCUSDT`, `ETHUSDT`;
@@ -21,9 +34,9 @@ La referencia principal es *Crypto Carry* (Schmeling, Schrimpf y Todorov; Manage
 - ventana histórica: 2022-01-01 a 2025-12-31;
 - 2026 cerrado.
 
-No se amplía a altcoins si BTC/ETH no muestran infraestructura histórica suficiente.
+No se amplió a altcoins.
 
-## Fuentes a inventariar
+## Fuentes auditadas
 
 Binance Public Data / `data.binance.vision`:
 
@@ -32,42 +45,37 @@ Binance Public Data / `data.binance.vision`:
 3. USD-M monthly `1h` markPriceKlines de esos mismos contratos;
 4. USD-M monthly fundingRate de los perpetuos BTCUSDT/ETHUSDT.
 
-Se listan metadatos S3; **no se descargan ZIP en 04C-0**.
+04C-0 listó metadatos S3; **no descargó ZIP para calcular retornos**.
 
-## Qué debe medir
+## Contratos fechados encontrados
 
-Por subyacente y contrato:
+BTC y ETH presentan la misma parrilla trimestral:
 
-- contratos fechados realmente archivados;
-- fecha de vencimiento codificada en el símbolo;
-- primer/último mes disponible;
-- continuidad mensual desde el primer mes observado hasta el mes de vencimiento;
-- archivos de tamaño cero y duplicados;
-- existencia pareada de trade-price klines y mark-price klines;
-- cobertura Spot 2022–2025;
-- cobertura de funding perpetual 2022–2025;
-- bytes comprimidos de cada familia para dimensionar 04C-1.
+- 2022: 220325, 220624, 220930, 221230;
+- 2023: 230331, 230630, 230929, 231229;
+- 2024: 240329, 240628, 240927, 241227;
+- 2025: 250328, 250627, 250926, 251226.
 
-## Gate de aptitud de datos
+Todos los 32 contratos pasaron continuidad de trade-price y mark-price desde su primer mes observado hasta el mes de vencimiento.
 
-El resultado será `DATASET_CARRY_APTO_04C0` solo si simultáneamente:
+## Gate de aptitud aplicado
 
-- Spot BTC y ETH tienen los 48 meses 2022–2025 en `1h`;
-- existen futuros fechados BTC y ETH con vencimientos en los cuatro años;
-- cada año tiene al menos dos vencimientos archivados por subyacente;
-- al menos 90% de los contratos fechados descubiertos tienen continuidad mensual de klines hasta su mes de vencimiento;
-- al menos 90% tienen markPriceKlines pareados suficientes para modelar riesgo mark-to-market;
-- funding perpetual BTC/ETH está disponible al menos en 95% de los 48 meses;
-- no hay objetos ZIP de tamaño cero en los objetos usados por el gate;
-- el listado S3 termina completamente, sin error de paginación.
+El resultado solo podía ser `DATASET_CARRY_APTO_04C0` si simultáneamente:
 
-Si falla el gate, no se calcula PnL y se documenta la brecha.
+- Spot BTC y ETH tenían los 48 meses 2022–2025 en `1h`;
+- existían futuros fechados BTC y ETH con vencimientos en los cuatro años;
+- cada año tenía al menos dos vencimientos archivados por subyacente;
+- al menos 90% de contratos fechados tenían continuidad mensual hasta vencimiento;
+- al menos 90% tenían `markPriceKlines` suficientes;
+- funding perpetual BTC/ETH estaba disponible al menos en 95% de los 48 meses;
+- no había objetos ZIP de tamaño cero usados por el gate;
+- los listados S3 terminaban completamente.
 
-## Costos y ejecución: qué NO se inferirá todavía
+Todos los requisitos se cumplieron.
 
-04C-0 no fija una comisión histórica por conveniencia. Binance usa maker/taker y la tarifa depende del producto, VIP/BNB y condiciones vigentes. Tampoco se asumirá cross-margin ni acceso de la cuenta a Futures.
+## Costos y ejecución todavía no inferidos
 
-Antes de 04C-1 deberán quedar fijados:
+04C-0 no fijó una comisión histórica por conveniencia. Antes de observar PnL en 04C-1 deben quedar congelados:
 
 - modelo conservador de fee Spot;
 - modelo conservador de fee Futures;
@@ -75,25 +83,21 @@ Antes de 04C-1 deberán quedar fijados:
 - capital inmovilizado;
 - margen y buffer de liquidación;
 - tratamiento de mark-to-market;
-- si la simulación usa entrada/salida taker o maker;
-- impuestos/costos externos, si aplican al caso real.
+- tipo de ejecución maker/taker;
+- hora exacta de entrada y settlement.
 
-## Variante primaria y secundaria
+Tampoco se asume cross-margin ni acceso de una cuenta real a Futures.
 
-### Primaria: futuros fechados
+## Variante primaria
 
-Long Spot + short future fechado. El basis converge mecánicamente al vencimiento, sujeto a ejecución, margen y riesgo de liquidación. Esta variante es la más cercana a la referencia académica y será la primera candidata a 04C-1.
+La siguiente fase será una réplica de **futuro fechado**, no una predicción direccional: long Spot + short future fechado aproximadamente un mes antes del vencimiento, con el mismo notional y seguimiento de riesgo mark-to-market hasta settlement. Perpetual funding carry queda fuera de esa misma prueba.
 
-### Secundaria: perpetual funding carry
+## Candados preservados
 
-Long Spot + short perpetual cuando funding esperado sea positivo. No se mezclará con la variante fechada en un mismo backtest. Funding puede cambiar de signo y los intervalos pueden cambiar, por lo que requiere otra especificación.
-
-## Candados
-
-- sin PnL en 04C-0;
-- sin thresholds de entrada de basis/funding;
-- sin optimización;
-- sin elegir contratos por rentabilidad observada;
+- no hubo PnL en 04C-0;
+- no hubo thresholds de entrada de basis/funding;
+- no hubo optimización;
+- no se eligieron contratos por rentabilidad observada;
 - sin 2026;
 - sin mayo-julio 2026;
 - sin credenciales reales;
@@ -102,8 +106,8 @@ Long Spot + short perpetual cuando funding esperado sea positivo. No se mezclar�
 - sin LIVE;
 - sin Render;
 - sin GPT para decidir operaciones;
-- no mergear mientras sea investigación.
+- no mergear esta rama de investigación.
 
-## Decisión posterior
+## Decisión
 
-Si `DATASET_CARRY_APTO_04C0`, 04C-1 deberá predeclarar una única réplica económica de cash-and-carry **antes de leer sus retornos**, incluyendo fees, slippage, capital total comprometido, margen y criterio de liquidación. Si no es apto, no se rescata cambiando universo o años dentro de 04C-0.
+**Habilitado diseñar 04C-1.** La metodología y los costos de 04C-1 deberán predeclararse antes de leer retornos históricos. Si la réplica económica falla, no se rescatará cambiando retrospectivamente entrada, vencimientos, leverage o hurdle.
