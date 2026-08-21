@@ -5,6 +5,8 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from backend.economia.carry_perpetual_04c2 import (
     EventoFunding04C2,
     PuntoPrecio04C2,
@@ -16,8 +18,10 @@ from backend.economia.carry_perpetual_04c2 import (
 )
 from backend.economia.protocolo_carry_04c2 import (
     ANIOS_04C2,
+    DAILY_ARCHIVE_FALLBACK_04C2,
     DESARROLLO_2026_ABIERTO_04C2,
     DRAG_ANUAL_NOTIONAL_04C2,
+    FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2,
     FUNDING_POSITIVO_COMO_FILTRO_04C2,
     IMPUTACION_PERMITIDA_04C2,
     LEVERAGE_ADICIONAL_PERMITIDO_04C2,
@@ -71,6 +75,8 @@ def test_protocol_locks_stay_closed_and_production_gate_is_material():
     assert SIMBOLOS_04C2 == ("BTCUSDT", "ETHUSDT")
     assert ANIOS_04C2 == (2022, 2023, 2024, 2025)
     assert DRAG_ANUAL_NOTIONAL_04C2 == Decimal("0.006")
+    assert FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2 == 1000
+    assert DAILY_ARCHIVE_FALLBACK_04C2 is True
     assert MEDIA_ANUAL_COMMITTED_PROD_MIN_04C2 == Decimal("0.05")
     assert SHARPE_PROD_MIN_04C2 == Decimal("2.0")
     assert DESARROLLO_2026_ABIERTO_04C2 is False
@@ -92,6 +98,26 @@ def test_parsers_accept_header_and_normalize_spot_microseconds():
     assert len(events) == 1
     assert events[0].interval_hours == 8
     assert events[0].rate == Decimal("0.0001")
+
+
+def test_funding_timestamp_up_to_one_second_maps_to_nominal_hour():
+    ts_ms = 1_704_412_800_000
+    funding = _zip_csv(
+        "calc_time,funding_interval_hours,last_funding_rate\n"
+        f"{ts_ms + 31},8,0.0001\n"
+    )
+    events = parse_funding_04c2(funding)
+    assert events[0].ts_ms == ts_ms
+
+
+def test_funding_timestamp_beyond_one_second_fails_closed():
+    ts_ms = 1_704_412_800_000
+    funding = _zip_csv(
+        "calc_time,funding_interval_hours,last_funding_rate\n"
+        f"{ts_ms + 1001},8,0.0001\n"
+    )
+    with pytest.raises(ValueError, match="fuera de tolerancia"):
+        parse_funding_04c2(funding)
 
 
 def test_equal_spot_and_perp_move_cancels_direction_before_costs():
