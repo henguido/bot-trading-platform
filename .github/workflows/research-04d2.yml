@@ -1,0 +1,72 @@
+name: research-04d2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/protocolo_metadata_04d2.py'
+      - 'backend/economia/auditoria_metadata_04d2.py'
+      - 'scripts/run_metadata_audit_04d2.py'
+      - 'tests/test_auditoria_metadata_04d2.py'
+      - 'docs/investigacion/04D-2-collateral-readonly.md'
+      - '.github/workflows/research-04d2.yml'
+
+jobs:
+  metadata-readonly-04d2:
+    if: github.head_ref == 'agent/bot-2.0-04d2-collateral-readonly'
+    runs-on: ubuntu-24.04
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      ALLOW_04D2_ACCOUNT_READONLY: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04d2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04D-2 security locks
+        run: |
+          test -z "$ALLOW_04D2_ACCOUNT_READONLY"
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from backend.economia.protocolo_metadata_04d2 import (
+              HTTP_METHODS_PERMITIDOS_04D2, ORDENES_PERMITIDAS_04D2,
+              CAMBIOS_CUENTA_PERMITIDOS_04D2, PAPER_OPERATIVO_PERMITIDO_04D2,
+              LIVE_PERMITIDO_04D2, RENDER_PERMITIDO_04D2,
+              DESARROLLO_2026_RETORNOS_ABIERTO_04D2, RECALIBRAR_04C2_PERMITIDO_04D2,
+          )
+          assert HTTP_METHODS_PERMITIDOS_04D2 == ('GET',)
+          assert ORDENES_PERMITIDAS_04D2 is False
+          assert CAMBIOS_CUENTA_PERMITIDOS_04D2 is False
+          assert PAPER_OPERATIVO_PERMITIDO_04D2 is False
+          assert LIVE_PERMITIDO_04D2 is False
+          assert RENDER_PERMITIDO_04D2 is False
+          assert DESARROLLO_2026_RETORNOS_ABIERTO_04D2 is False
+          assert RECALIBRAR_04C2_PERMITIDO_04D2 is False
+          print('04D-2 security locks OK')
+          PY
+      - name: Unit tests 04D-2
+        run: pytest -q tests/test_auditoria_metadata_04d2.py
+      - name: Run no-credentials audit
+        run: |
+          python scripts/run_metadata_audit_04d2.py
+          grep -q 'METADATA_CUENTA_NO_DISPONIBLE_04D2' artifacts/metadata-account-04d2.json
+      - name: Upload 04D-2 status artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metadata-account-04d2-no-credentials
+          path: artifacts/metadata-account-04d2.json
+          retention-days: 14
