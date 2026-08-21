@@ -1,20 +1,20 @@
 """Adquisición y reducción de AggTrades Spot para BOT 2.0-04B-v24."""
 from __future__ import annotations
 
-import csv
 import io
-import itertools
+import math
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Optional, Sequence
+from decimal import Decimal
+from typing import Any, Callable, Optional
 
 import requests
 
 CDN_BASE_V24 = "https://data.binance.vision"
 TIMEOUT_V24_SEGUNDOS = 90
 _UMBRAL_MICROSEGUNDOS = 100_000_000_000_000
+_DIA_MS = 24 * 60 * 60 * 1000
 
 
 @dataclass(frozen=True)
@@ -53,116 +53,127 @@ def _error(exc: Exception) -> str:
     return f"{type(exc).__name__}: {texto[:300]}"
 
 
-def _decimal_positivo(texto: str) -> Decimal:
-    try:
-        d = Decimal(str(texto).strip())
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise ValueError("decimal invalido") from exc
-    if not d.is_finite() or d <= 0:
-        raise ValueError("decimal no positivo")
-    return d
-
-
-def _entero_no_negativo(texto: str) -> int:
-    n = int(str(texto).strip())
-    if n < 0:
-        raise ValueError("entero negativo")
-    return n
-
-
-def _bool_estricto(texto: str) -> bool:
-    t = str(texto).strip().lower()
-    if t == "true":
+def _bool_bytes(valor: bytes) -> bool:
+    v = valor.strip().lower()
+    if v == b"true":
         return True
-    if t == "false":
+    if v == b"false":
         return False
     raise ValueError("booleano invalido")
 
 
-def _es_header(fila: Sequence[str]) -> bool:
-    if not fila:
+def _campos(linea: bytes) -> list[bytes]:
+    return linea.strip().lstrip(b"\xef\xbb\xbf").split(b",")
+
+
+def _es_header_campos(campos: list[bytes]) -> bool:
+    if not campos:
         return False
     try:
-        int(str(fila[0]).strip())
+        int(campos[0])
         return False
     except ValueError:
         return True
 
 
-def _timestamp_ms_spot(raw: int, year: int) -> tuple[str, int]:
-    unidad = "microseconds" if raw >= _UMBRAL_MICROSEGUNDOS else "milliseconds"
-    esperada = "microseconds" if year >= 2025 else "milliseconds"
-    if unidad != esperada:
-        raise ValueError(f"unidad timestamp inesperada: {unidad}; esperaba {esperada}")
-    return unidad, raw // 1000 if unidad == "microseconds" else raw
-
-
 def resumir_aggtrades_v24(archivo: ArchivoAggTradesV24, contenido_zip: bytes) -> FlujoDiaV24:
-    """Valida un ZIP diario y reduce sus filas a buy/sell quote volume y OFI."""
+    """Valida un ZIP diario y reduce sus filas a buy/sell quote volume y OFI.
+
+    El hot path usa bytes + float64 para evitar materializar texto/Decimal por
+    cientos de millones de filas. Los agregados por archivo se convierten a
+    Decimal antes de calcular OFI y toda la evaluación posterior.
+    """
     base = dict(symbol=archivo.symbol, fecha=archivo.fecha, key=archivo.key)
     try:
+        inicio_ms = int(
+            datetime(
+                archivo.fecha.year, archivo.fecha.month, archivo.fecha.day,
+                tzinfo=timezone.utc,
+            ).timestamp() * 1000
+        )
+        if archivo.fecha.year >= 2025:
+            unidad = "microseconds"
+            inicio_raw = inicio_ms * 1000
+            fin_raw = (inicio_ms + _DIA_MS) * 1000
+        else:
+            unidad = "milliseconds"
+            inicio_raw = inicio_ms
+            fin_raw = inicio_ms + _DIA_MS
+
         with zipfile.ZipFile(io.BytesIO(contenido_zip)) as zf:
             csvs = [n for n in zf.namelist() if n.lower().endswith(".csv") and not n.endswith("/")]
             if len(csvs) != 1:
                 raise ValueError("ZIP aggTrades debe contener exactamente un CSV")
             with zf.open(csvs[0], "r") as raw:
-                lector = csv.reader(io.TextIOWrapper(raw, encoding="utf-8-sig", newline=""))
-                primera = next(lector, None)
-                if primera is None:
+                primera = raw.readline()
+                if not primera:
                     raise ValueError("CSV vacio")
-                filas = lector if _es_header(primera) else itertools.chain((primera,), lector)
+                primeros_campos = _campos(primera)
+                usar_primera = not _es_header_campos(primeros_campos)
                 prev_id = None
                 prev_ts = None
-                unidad_vista = None
                 n = 0
-                buy_quote = Decimal("0")
-                sell_quote = Decimal("0")
-                for fila in filas:
-                    if not fila or all(not str(x).strip() for x in fila):
-                        continue
-                    if len(fila) != 8:
-                        raise ValueError(f"columnas inesperadas: {len(fila)} != 8")
-                    agg_id = _entero_no_negativo(fila[0])
+                buy_quote = 0.0
+                sell_quote = 0.0
+
+                def procesar(campos: list[bytes]) -> None:
+                    nonlocal prev_id, prev_ts, n, buy_quote, sell_quote
+                    if len(campos) != 8:
+                        raise ValueError(f"columnas inesperadas: {len(campos)} != 8")
+                    agg_id = int(campos[0])
+                    if agg_id < 0:
+                        raise ValueError("aggregate trade id negativo")
                     if prev_id is not None and agg_id <= prev_id:
                         raise ValueError("aggregate trade IDs no estrictamente ascendentes")
                     prev_id = agg_id
-                    precio = _decimal_positivo(fila[1])
-                    cantidad = _decimal_positivo(fila[2])
-                    first_id = _entero_no_negativo(fila[3])
-                    last_id = _entero_no_negativo(fila[4])
-                    if first_id > last_id:
-                        raise ValueError("first trade id > last trade id")
-                    raw_ts = _entero_no_negativo(fila[5])
-                    unidad, ts_ms = _timestamp_ms_spot(raw_ts, archivo.fecha.year)
-                    if unidad_vista is None:
-                        unidad_vista = unidad
-                    elif unidad_vista != unidad:
-                        raise ValueError("unidades timestamp mezcladas")
-                    if prev_ts is not None and ts_ms < prev_ts:
+                    precio = float(campos[1])
+                    cantidad = float(campos[2])
+                    if not math.isfinite(precio) or precio <= 0:
+                        raise ValueError("precio invalido")
+                    if not math.isfinite(cantidad) or cantidad <= 0:
+                        raise ValueError("cantidad invalida")
+                    first_id = int(campos[3])
+                    last_id = int(campos[4])
+                    if first_id < 0 or last_id < 0 or first_id > last_id:
+                        raise ValueError("rango trade ids invalido")
+                    raw_ts = int(campos[5])
+                    if not inicio_raw <= raw_ts < fin_raw:
+                        raise ValueError("timestamp fuera del dia/unidad nominal")
+                    if prev_ts is not None and raw_ts < prev_ts:
                         raise ValueError("timestamps descendentes")
-                    prev_ts = ts_ms
-                    if datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date() != archivo.fecha:
-                        raise ValueError("timestamp fuera del dia nominal")
-                    buyer_maker = _bool_estricto(fila[6])
-                    _bool_estricto(fila[7])
+                    prev_ts = raw_ts
+                    buyer_maker = _bool_bytes(campos[6])
+                    _bool_bytes(campos[7])
                     quote = precio * cantidad
+                    if not math.isfinite(quote) or quote <= 0:
+                        raise ValueError("quote invalido")
                     if buyer_maker:
                         sell_quote += quote
                     else:
                         buy_quote += quote
                     n += 1
+
+                if usar_primera:
+                    procesar(primeros_campos)
+                for linea in raw:
+                    if not linea.strip():
+                        continue
+                    procesar(_campos(linea))
+
                 if n == 0:
                     raise ValueError("CSV sin filas de datos")
-                total = buy_quote + sell_quote
+                buy_d = Decimal(str(buy_quote))
+                sell_d = Decimal(str(sell_quote))
+                total = buy_d + sell_d
                 if total <= 0:
                     raise ValueError("quote volume total no positivo")
-                ofi = (buy_quote - sell_quote) / total
+                ofi = (buy_d - sell_d) / total
                 if ofi < Decimal("-1") or ofi > Decimal("1"):
                     raise ValueError("OFI fuera de rango")
         return FlujoDiaV24(
             **base, completa=True, n_filas=n, bytes_zip=len(contenido_zip),
-            taker_buy_quote=buy_quote, taker_sell_quote=sell_quote, ofi=ofi,
-            unidad_timestamp=unidad_vista, error=None,
+            taker_buy_quote=buy_d, taker_sell_quote=sell_d, ofi=ofi,
+            unidad_timestamp=unidad, error=None,
         )
     except Exception as exc:
         return FlujoDiaV24(
