@@ -8,6 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+from itertools import chain
 from typing import Any, Callable, Optional, Sequence, Tuple
 
 import requests
@@ -113,7 +114,7 @@ def seleccionar_muestra_diaria_v23a(
     http_get: Optional[Callable[..., Any]] = None,
     timeout_segundos: int = TIMEOUT_V23A_SEGUNDOS,
 ) -> SeleccionMuestraV23A:
-    """Selecciona el ZIP de tamaño mediano del mes sin mirar su contenido."""
+    """Elige por tamaño el ZIP diario mediano de un mes, sin mirar contenido."""
     if not symbol.isalnum():
         raise ValueError("symbol invalido")
     if not (2022 <= int(year) <= 2025 and 1 <= int(month) <= 12):
@@ -138,9 +139,8 @@ def seleccionar_muestra_diaria_v23a(
             pares, truncado, siguiente = _parsear_listado_s3(contenido)
             for key, size in pares:
                 fecha = _fecha_desde_key(mercado, symbol, key)
-                if fecha is None or fecha.year != year or fecha.month != month or size <= 0:
-                    continue
-                archivos.append(ArchivoDiarioAggTradesV23A(mercado, symbol, fecha, key, size))
+                if fecha is not None and fecha.year == year and fecha.month == month and size > 0:
+                    archivos.append(ArchivoDiarioAggTradesV23A(mercado, symbol, fecha, key, size))
             if not truncado:
                 break
             assert siguiente is not None
@@ -148,7 +148,6 @@ def seleccionar_muestra_diaria_v23a(
                 raise ValueError("continuation token S3 repetido")
             tokens_vistos.add(siguiente)
             token = siguiente
-
         if not archivos:
             raise ValueError("sin ZIP diarios candidatos")
         ordenados = sorted(archivos, key=lambda a: (a.size, a.fecha, a.key))
@@ -201,7 +200,6 @@ def _es_header(fila: Sequence[str]) -> bool:
 
 
 def _unidad_y_ms(mercado: str, year: int, raw_ts: int) -> Tuple[str, int]:
-    # Epoch moderno: ms ~1e12-1e13, µs ~1e15-1e16.
     unidad = "microseconds" if raw_ts >= 100_000_000_000_000 else "milliseconds"
     if mercado == "spot":
         esperada = "microseconds" if year >= SPOT_MICROSEGUNDOS_DESDE_ANIO_V23A else "milliseconds"
@@ -214,46 +212,59 @@ def _unidad_y_ms(mercado: str, year: int, raw_ts: int) -> Tuple[str, int]:
     return unidad, raw_ts // 1000 if unidad == "microseconds" else raw_ts
 
 
-def resumir_zip_aggtrades_v23a(
-    archivo: ArchivoDiarioAggTradesV23A,
-    contenido_zip: bytes,
-) -> ResumenContenidoV23A:
-    """Valida un ZIP diario en streaming dentro del contenedor ZIP."""
-    base = dict(
+def _fallo(archivo: ArchivoDiarioAggTradesV23A, exc: Exception) -> ResumenContenidoV23A:
+    return ResumenContenidoV23A(
         mercado=archivo.mercado,
         symbol=archivo.symbol,
         fecha=archivo.fecha,
         key=archivo.key,
         size_zip=archivo.size,
+        completa=False,
+        n_filas=0,
+        n_columnas=0,
+        tenia_header=False,
+        unidad_timestamp=None,
+        primer_ts_ms=None,
+        ultimo_ts_ms=None,
+        ids_agg_duplicados=0,
+        ids_agg_no_ascendentes=0,
+        timestamps_descendentes=0,
+        precios_invalidos=0,
+        cantidades_invalidas=0,
+        booleanos_invalidos=0,
+        timestamps_fuera_dia=0,
+        taker_buy_trades=0,
+        taker_sell_trades=0,
+        taker_buy_base=Decimal("0"),
+        taker_sell_base=Decimal("0"),
+        taker_buy_quote=Decimal("0"),
+        taker_sell_quote=Decimal("0"),
+        error=_error(exc),
     )
+
+
+def resumir_zip_aggtrades_v23a(
+    archivo: ArchivoDiarioAggTradesV23A,
+    contenido_zip: bytes,
+) -> ResumenContenidoV23A:
+    """Valida un ZIP diario; el CSV se consume fila a fila, no se materializa."""
     try:
         with zipfile.ZipFile(io.BytesIO(contenido_zip)) as zf:
             csvs = [n for n in zf.namelist() if n.lower().endswith(".csv") and not n.endswith("/")]
             if len(csvs) != 1:
                 raise ValueError("ZIP aggTrades debe contener exactamente un CSV")
             with zf.open(csvs[0], "r") as raw:
-                texto = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
-                lector = csv.reader(texto)
+                lector = csv.reader(io.TextIOWrapper(raw, encoding="utf-8-sig", newline=""))
                 primera = next(lector, None)
                 if primera is None:
                     raise ValueError("CSV aggTrades vacio")
                 tenia_header = _es_header(primera)
-                filas = lector if tenia_header else iter([primera, *lector])
-
+                filas = lector if tenia_header else chain((primera,), lector)
                 esperado_cols = 8 if archivo.mercado == "spot" else 7
                 n = 0
                 ids = set()
-                dup_ids = 0
-                no_asc_ids = 0
-                ts_desc = 0
-                precio_bad = 0
-                qty_bad = 0
-                bool_bad = 0
-                fuera_dia = 0
-                prev_id = None
-                prev_ts_ms = None
-                primer_ts_ms = None
-                ultimo_ts_ms = None
+                dup_ids = no_asc_ids = ts_desc = 0
+                prev_id = prev_ts_ms = primer_ts_ms = ultimo_ts_ms = None
                 unidad_vista = None
                 buy_n = sell_n = 0
                 buy_base = sell_base = Decimal("0")
@@ -272,50 +283,30 @@ def resumir_zip_aggtrades_v23a(
                     if prev_id is not None and agg_id <= prev_id:
                         no_asc_ids += 1
                     prev_id = agg_id
-
-                    try:
-                        precio = _decimal_positivo(fila[1])
-                    except ValueError:
-                        precio_bad += 1
-                        raise
-                    try:
-                        qty = _decimal_positivo(fila[2])
-                    except ValueError:
-                        qty_bad += 1
-                        raise
+                    precio = _decimal_positivo(fila[1])
+                    qty = _decimal_positivo(fila[2])
                     first_id = _entero_no_negativo(fila[3])
                     last_id = _entero_no_negativo(fila[4])
                     if first_id > last_id:
                         raise ValueError("first trade id > last trade id")
-
                     raw_ts = _entero_no_negativo(fila[5])
                     unidad, ts_ms = _unidad_y_ms(archivo.mercado, archivo.fecha.year, raw_ts)
                     if unidad_vista is None:
                         unidad_vista = unidad
                     elif unidad != unidad_vista:
                         raise ValueError("unidades timestamp mezcladas")
-                    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-                    if dt.date() != archivo.fecha:
-                        fuera_dia += 1
+                    if datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date() != archivo.fecha:
                         raise ValueError("timestamp fuera del día nominal")
                     if prev_ts_ms is not None and ts_ms < prev_ts_ms:
                         ts_desc += 1
-                        raise ValueError("timestamps descendentes")
                     prev_ts_ms = ts_ms
                     primer_ts_ms = ts_ms if primer_ts_ms is None else primer_ts_ms
                     ultimo_ts_ms = ts_ms
-
-                    try:
-                        buyer_maker = _bool_estricto(fila[6])
-                        if archivo.mercado == "spot":
-                            _bool_estricto(fila[7])
-                    except ValueError:
-                        bool_bad += 1
-                        raise
-
+                    buyer_maker = _bool_estricto(fila[6])
+                    if archivo.mercado == "spot":
+                        _bool_estricto(fila[7])
                     quote = precio * qty
-                    # isBuyerMaker=True => el comprador fue maker; el agresor fue vendedor.
-                    if buyer_maker:
+                    if buyer_maker:  # comprador maker => vendedor agresor
                         sell_n += 1
                         sell_base += qty
                         sell_quote += quote
@@ -323,12 +314,21 @@ def resumir_zip_aggtrades_v23a(
                         buy_n += 1
                         buy_base += qty
                         buy_quote += quote
-
                 if n == 0:
                     raise ValueError("CSV aggTrades sin filas de datos")
+                if dup_ids:
+                    raise ValueError(f"aggregate ids duplicados: {dup_ids}")
+                if no_asc_ids:
+                    raise ValueError(f"aggregate ids no ascendentes: {no_asc_ids}")
+                if ts_desc:
+                    raise ValueError(f"timestamps descendentes: {ts_desc}")
 
         return ResumenContenidoV23A(
-            **base,
+            mercado=archivo.mercado,
+            symbol=archivo.symbol,
+            fecha=archivo.fecha,
+            key=archivo.key,
+            size_zip=archivo.size,
             completa=True,
             n_filas=n,
             n_columnas=esperado_cols,
@@ -339,10 +339,10 @@ def resumir_zip_aggtrades_v23a(
             ids_agg_duplicados=dup_ids,
             ids_agg_no_ascendentes=no_asc_ids,
             timestamps_descendentes=ts_desc,
-            precios_invalidos=precio_bad,
-            cantidades_invalidas=qty_bad,
-            booleanos_invalidos=bool_bad,
-            timestamps_fuera_dia=fuera_dia,
+            precios_invalidos=0,
+            cantidades_invalidas=0,
+            booleanos_invalidos=0,
+            timestamps_fuera_dia=0,
             taker_buy_trades=buy_n,
             taker_sell_trades=sell_n,
             taker_buy_base=buy_base,
@@ -352,30 +352,7 @@ def resumir_zip_aggtrades_v23a(
             error=None,
         )
     except Exception as exc:
-        return ResumenContenidoV23A(
-            **base,
-            completa=False,
-            n_filas=0,
-            n_columnas=0,
-            tenia_header=False,
-            unidad_timestamp=None,
-            primer_ts_ms=None,
-            ultimo_ts_ms=None,
-            ids_agg_duplicados=0,
-            ids_agg_no_ascendentes=0,
-            timestamps_descendentes=0,
-            precios_invalidos=0,
-            cantidades_invalidas=0,
-            booleanos_invalidos=0,
-            timestamps_fuera_dia=0,
-            taker_buy_trades=0,
-            taker_sell_trades=0,
-            taker_buy_base=Decimal("0"),
-            taker_sell_base=Decimal("0"),
-            taker_buy_quote=Decimal("0"),
-            taker_sell_quote=Decimal("0"),
-            error=_error(exc),
-        )
+        return _fallo(archivo, exc)
 
 
 def descargar_resumir_v23a(
@@ -393,31 +370,4 @@ def descargar_resumir_v23a(
             raise ValueError("descarga excede límite de seguridad")
         return resumir_zip_aggtrades_v23a(archivo, contenido)
     except Exception as exc:
-        return ResumenContenidoV23A(
-            mercado=archivo.mercado,
-            symbol=archivo.symbol,
-            fecha=archivo.fecha,
-            key=archivo.key,
-            size_zip=archivo.size,
-            completa=False,
-            n_filas=0,
-            n_columnas=0,
-            tenia_header=False,
-            unidad_timestamp=None,
-            primer_ts_ms=None,
-            ultimo_ts_ms=None,
-            ids_agg_duplicados=0,
-            ids_agg_no_ascendentes=0,
-            timestamps_descendentes=0,
-            precios_invalidos=0,
-            cantidades_invalidas=0,
-            booleanos_invalidos=0,
-            timestamps_fuera_dia=0,
-            taker_buy_trades=0,
-            taker_sell_trades=0,
-            taker_buy_base=Decimal("0"),
-            taker_sell_base=Decimal("0"),
-            taker_buy_quote=Decimal("0"),
-            taker_sell_quote=Decimal("0"),
-            error=_error(exc),
-        )
+        return _fallo(archivo, exc)
