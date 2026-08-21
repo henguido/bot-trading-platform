@@ -1,0 +1,76 @@
+name: research-04c1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/carry_04c1.py'
+      - 'scripts/run_carry_04c1.py'
+      - 'tests/test_carry_04c1.py'
+      - 'docs/investigacion/04C-1-replica-cash-and-carry.md'
+      - '.github/workflows/research-04c1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-04c1-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  carry-replication-04c1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04c1
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04C-1 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from backend.economia.carry_04c1 import (
+              ENTRY_DAYS_BEFORE_04C1, ENTRY_HOUR_UTC_04C1,
+              HURDLE_BPS_04C1, MARGIN_DRAWDOWN_MAX_04C1,
+              MIN_TRADES_04C1, CONTRACTS_04C1,
+          )
+          assert ENTRY_DAYS_BEFORE_04C1 == 28
+          assert ENTRY_HOUR_UTC_04C1 == 8
+          assert str(HURDLE_BPS_04C1) == '60'
+          assert str(MARGIN_DRAWDOWN_MAX_04C1) == '0.50'
+          assert MIN_TRADES_04C1 == 8
+          assert len(CONTRACTS_04C1) == 32
+          print('04C-1 methodology locks OK')
+          PY
+          grep -q 'no cambiar hurdle de 60 bps' docs/investigacion/04C-1-replica-cash-and-carry.md
+          grep -q 'no 2026' docs/investigacion/04C-1-replica-cash-and-carry.md
+      - name: Unit tests 04C-1
+        run: pytest -q tests/test_carry_04c1.py
+      - name: Run fixed cash-and-carry replication
+        run: python scripts/run_carry_04c1.py
+      - name: Upload 04C-1 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: carry-04c1-replica-2022-2025
+          path: artifacts/carry-04c1-replica-2022-2025.json
+          if-no-files-found: error
+          retention-days: 14
