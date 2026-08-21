@@ -2,11 +2,11 @@
 
 ## Estado
 
-**PREDECLARADO — tamaños remotos todavía no observados al fijar este protocolo.**
+**CERRADO — `PLAN_TRANSFERENCIA_APTO_CI_V23B`.**
 
-v23 confirmó cobertura mensual de AggTrades y v23a validó contenido real. v23b no prueba rentabilidad ni descarga trades: dimensiona exactamente cuánto pesa el calendario candidato para una futura hipótesis económica v24.
+v23 confirmó cobertura mensual de AggTrades y v23a validó contenido real. v23b no probó rentabilidad ni descargó trades: dimensionó exactamente cuánto pesa el calendario candidato para una futura hipótesis económica v24.
 
-## Calendario fijado
+## Calendario fijado antes del resultado
 
 - mercado: Spot;
 - universo: los 20 símbolos fijos heredados de 04B-v2;
@@ -16,30 +16,57 @@ v23 confirmó cobertura mensual de AggTrades y v23a validó contenido real. v23b
 - 20 símbolos por fecha;
 - 1.920 ZIP diarios objetivo.
 
-Las fechas no se sustituyen por otras según tamaño, actividad, volatilidad o disponibilidad posterior. Si el plan supera el presupuesto de CI, se conserva el mismo calendario y solo cambia el mecanismo de adquisición/caché.
+Las fechas no se sustituyeron según tamaño, actividad, volatilidad o disponibilidad posterior.
 
-## Gate de cobertura
+## Gate predeclarado
 
-El plan es técnicamente apto únicamente si:
+El plan era técnicamente apto únicamente si:
 
-- los 20 listados S3 terminan completamente;
-- al menos 95% de los 1.920 archivos objetivo están presentes;
-- las 96 fechas conservan al menos 15 símbolos cada una;
-- no existen objetos duplicados para el mismo símbolo/fecha;
-- ningún objeto objetivo tiene tamaño cero.
+- los 20 listados S3 terminaban completamente;
+- al menos 95% de los 1.920 archivos objetivo estaban presentes;
+- las 96 fechas conservaban al menos 15 símbolos cada una;
+- no existían objetos duplicados para el mismo símbolo/fecha;
+- ningún objeto objetivo tenía tamaño cero.
 
-## Presupuesto de ingeniería
+Antes de observar tamaños se fijó además un máximo de **15 GiB comprimidos** para permitir una futura descarga completa dentro del job estándar de CI. El presupuesto nunca autorizó modificar el calendario.
 
-Antes de observar tamaños se fija un máximo de **15 GiB comprimidos** para ejecutar una futura descarga completa dentro del job estándar de CI.
+## Resultado remoto
 
-El presupuesto no es un gate de datos. Si cobertura/calidad pasan pero el total excede 15 GiB, el resultado será `PLAN_TRANSFERENCIA_APTO_FUERA_CI_V23B`: v24 deberá materializar/cachar por lotes sin cambiar calendario.
+Resultado: **`PLAN_TRANSFERENCIA_APTO_CI_V23B`**.
 
-Si cobertura/calidad pasan y el total cabe en 15 GiB, el resultado será `PLAN_TRANSFERENCIA_APTO_CI_V23B`.
+- listados S3 completos: **20/20**;
+- ZIP diarios presentes: **1.920/1.920**;
+- fechas aptas: **96/96**;
+- símbolos por fecha: **20–20**, por lo que todas las fechas tienen el universo completo;
+- tamaño comprimido exacto del calendario: **7.617537 GiB**;
+- presupuesto CI predeclarado: **15 GiB**;
+- entra en CI: **sí**;
+- motivos de rechazo: **ninguno**.
 
-## Prohibiciones
+La ejecución solo leyó metadatos de S3. No descargó el contenido de los ZIP, no calculó imbalance y no observó retornos.
 
-- no descargar contenido AggTrades;
-- no calcular imbalance;
+## Incidencia de ingeniería
+
+El primer run falló antes de producir datos por `ModuleNotFoundError: No module named 'backend'` al ejecutar directamente el runner dentro de `scripts/`. Se corrigió únicamente la inserción de la raíz del repositorio en `sys.path`, usando el patrón ya existente en otros runners del proyecto. No se modificó ninguna fecha, símbolo, gate ni presupuesto.
+
+El segundo run, con exactamente el mismo protocolo, terminó correctamente.
+
+## Evidencia de CI
+
+- workflow `research-04b-v23b` run #2: **success**;
+- artifact: `orderflow-transfer-plan-v23b-2022-2025`;
+- artifact id: `9452276151`;
+- digest: `sha256:93fc8bda4d16c694534fa3fdac5051cc88ba2f263a9a56678d10536a0914f4e9`;
+- CI general #87: **success**;
+- pytest: **1131 passed**;
+- `compileall backend`: OK;
+- frontend Vite: **841 módulos**;
+- auditoría v20.1: revalidada y apta.
+
+## Prohibiciones mantenidas
+
+- no contenido AggTrades;
+- no imbalance;
 - no retornos;
 - no labels;
 - no correlaciones;
@@ -57,4 +84,4 @@ Si cobertura/calidad pasan y el total cabe en 15 GiB, el resultado será `PLAN_T
 
 ## Decisión posterior
 
-Solo si v23b pasa cobertura se podrá predeclarar v24. v24 deberá fijar antes de descargar contenido: feature exacta de order flow, neutralización/control por retorno contemporáneo, horizonte, selección cross-sectional, baseline, hurdle total y criterios temporales de estabilidad.
+v23b habilita técnicamente predeclarar v24 con el mismo calendario fijo. v24 deberá fijar antes de descargar contenido: feature exacta de order flow, control por retorno contemporáneo, horizonte, selección cross-sectional, baseline, hurdle total y criterios temporales de estabilidad.
