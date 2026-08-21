@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, getcontext
+from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import requests
@@ -37,7 +39,7 @@ CONTRACTS_04C1: Tuple[str, ...] = tuple(
 )
 
 BINANCE_DATA = "https://data.binance.vision/data"
-DELIVERY_PRICE_URL = "https://fapi.binance.com/futures/data/delivery-price"
+DELIVERY_FIXTURE_04C1 = Path(__file__).resolve().parent / "data" / "carry_04c1_delivery_prices.json"
 TIMEOUT_04C1 = 45
 
 
@@ -98,7 +100,6 @@ def _d(value) -> Decimal:
 
 def _ms_from_csv(raw: str) -> int:
     value = int(raw)
-    # Spot public data uses microseconds from 2025-01-01 onward.
     if value >= 100_000_000_000_000:
         return value // 1000
     return value
@@ -207,19 +208,27 @@ def _months_covering(start: datetime, end: datetime) -> Tuple[datetime, ...]:
 
 
 def fetch_delivery_prices_04c1(session: Optional[requests.Session] = None) -> Dict[Tuple[str, int], Decimal]:
-    s = session or requests.Session()
+    """Carga settlement oficiales congelados antes del PnL.
+
+    GitHub-hosted runners reciben HTTP 451 desde fapi.binance.com. El fixture
+    contiene la respuesta pública oficial capturada para los 32 expiries del
+    protocolo y evita convertir el geoblocking en una modificación económica.
+    """
+    del session
+    payload = json.loads(DELIVERY_FIXTURE_04C1.read_text(encoding="utf-8"))
+    prices = payload.get("prices")
+    if not isinstance(prices, dict):
+        raise ValueError("fixture delivery prices invalido")
+    if set(prices) != set(CONTRACTS_04C1):
+        raise ValueError("fixture delivery prices no cubre exactamente 32 contratos")
     out: Dict[Tuple[str, int], Decimal] = {}
-    for pair in ("BTCUSDT", "ETHUSDT"):
-        r = s.get(DELIVERY_PRICE_URL, params={"pair": pair}, timeout=TIMEOUT_04C1)
-        r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, list):
-            raise ValueError("delivery-price response no es lista")
-        for item in data:
-            ts = int(item["deliveryTime"])
-            price = _d(item["deliveryPrice"])
-            if price > 0:
-                out[(pair, ts)] = price
+    for symbol in CONTRACTS_04C1:
+        expiry_ms = int(_expiry_from_symbol(symbol).timestamp() * 1000)
+        pair = f"{symbol[:3]}USDT"
+        price = _d(prices[symbol])
+        if price <= 0:
+            raise ValueError(f"deliveryPrice no positivo: {symbol}")
+        out[(pair, expiry_ms)] = price
     return out
 
 
@@ -277,7 +286,7 @@ def evaluar_contrato_04c1(x: InputCarry04C1) -> ResultadoContrato04C1:
     annualized = net_capital * Decimal("365") / Decimal(str(ENTRY_DAYS_BEFORE_04C1)) if eligible else Decimal("0")
     tracking = s1 - d if eligible else Decimal("0")
     margin_dd = max(Decimal("0"), (x.max_mark_price - f0) / s0) if eligible else Decimal("0")
-    safe = (margin_dd < MARGIN_DRAWDOWN_MAX_04C1) if eligible else True
+    safe = margin_dd < MARGIN_DRAWDOWN_MAX_04C1 if eligible else True
 
     return ResultadoContrato04C1(
         symbol=x.symbol,
