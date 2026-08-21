@@ -1,0 +1,85 @@
+name: research-04d1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/protocolo_produccion_04d1.py'
+      - 'backend/economia/auditoria_produccion_04d1.py'
+      - 'backend/economia/data/carry_04c2_inputs_04d1.json'
+      - 'scripts/run_production_feasibility_04d1.py'
+      - 'tests/test_auditoria_produccion_04d1.py'
+      - 'docs/investigacion/04D-1-factibilidad-produccion-carry.md'
+      - '.github/workflows/research-04d1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-04d1-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  carry-production-feasibility-04d1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04d1
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04D-1 locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from decimal import Decimal
+          from backend.economia.protocolo_produccion_04d1 import (
+              SIMBOLOS_04D1, NOTIONALES_USD_04D1, DRAG_ALL_IN_BPS_HEREDADO_04C2,
+              MAX_FRICCION_LIBRO_ROUNDTRIP_BPS_04D1, MARGEN_FUTURES_ESTATICO_MULTIPLO_04D1,
+              CAPITAL_TOTAL_REFERENCIA_04C2, ORDENES_PERMITIDAS_04D1,
+              CREDENCIALES_REQUERIDAS_04D1, RECALIBRAR_GATE_04C2_PERMITIDO_04D1,
+              DESARROLLO_2026_RETORNOS_ABIERTO_04D1,
+          )
+          assert SIMBOLOS_04D1 == ('BTCUSDT', 'ETHUSDT')
+          assert NOTIONALES_USD_04D1 == (Decimal('500'), Decimal('5000'), Decimal('25000'), Decimal('100000'))
+          assert DRAG_ALL_IN_BPS_HEREDADO_04C2 == Decimal('60')
+          assert MAX_FRICCION_LIBRO_ROUNDTRIP_BPS_04D1 == Decimal('10')
+          assert MARGEN_FUTURES_ESTATICO_MULTIPLO_04D1 == Decimal('1')
+          assert CAPITAL_TOTAL_REFERENCIA_04C2 == Decimal('2')
+          assert ORDENES_PERMITIDAS_04D1 is False
+          assert CREDENCIALES_REQUERIDAS_04D1 is False
+          assert RECALIBRAR_GATE_04C2_PERMITIDO_04D1 is False
+          assert DESARROLLO_2026_RETORNOS_ABIERTO_04D1 is False
+          print('04D-1 locks OK')
+          PY
+          grep -q 'AUDITORÍA READ-ONLY' docs/investigacion/04D-1-factibilidad-produccion-carry.md
+          grep -q 'PRODUCCION_NO_AUTORIZADA_04D1' docs/investigacion/04D-1-factibilidad-produccion-carry.md
+      - name: Unit tests 04D-1
+        run: pytest -q tests/test_auditoria_produccion_04d1.py
+      - name: Run public production feasibility audit
+        run: python scripts/run_production_feasibility_04d1.py
+      - name: Upload 04D-1 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-feasibility-04d1
+          path: artifacts/production-feasibility-04d1.json
+          if-no-files-found: error
+          retention-days: 14
