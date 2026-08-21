@@ -1,9 +1,15 @@
+#!/usr/bin/env python3
 """Ejecuta BOT 2.0-04B-v23b: inventario de tamaños, sin descargar trades."""
 from __future__ import annotations
 
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parents[1]
+if str(RAIZ) not in sys.path:
+    sys.path.insert(0, str(RAIZ))
 
 from backend.economia.inventario_orderflow_v23b import evaluar_plan_v23b, listar_symbol_v23b
 from backend.economia.protocolo_orderflow_v23b import (
@@ -16,7 +22,7 @@ from backend.economia.protocolo_orderflow_v23b import (
     USA_RETORNOS_V23B,
 )
 
-ARTEFACTO = Path("artifacts/orderflow-transfer-plan-v23b-2022-2025.json")
+ARTEFACTO = RAIZ / "artifacts" / "orderflow-transfer-plan-v23b-2022-2025.json"
 
 
 def main() -> int:
