@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -109,7 +110,7 @@ def resumir_aggtrades_v24(archivo: ArchivoAggTradesV24, contenido_zip: bytes) ->
                 primera = next(lector, None)
                 if primera is None:
                     raise ValueError("CSV vacio")
-                filas = lector if _es_header(primera) else iter([primera, *lector])
+                filas = lector if _es_header(primera) else itertools.chain((primera,), lector)
                 prev_id = None
                 prev_ts = None
                 unidad_vista = None
