@@ -1,0 +1,33 @@
+{
+  "source_pr": 31,
+  "source_head_sha": "180d53bdfab16a8cdc548b35ff97d6391a3b6bc7",
+  "source_status": "closed_unmerged",
+  "economic_verdict": "CARRY_ECONOMICAMENTE_APTO_04C2",
+  "production_verdict": "CARRY_NO_CANDIDATO_PRODUCCION_04C2",
+  "portfolio": {
+    "mean_annual_net_notional": "0.093764",
+    "mean_annual_committed_2x": "0.046882",
+    "worst_year_committed_2x": "0.006207",
+    "daily_sharpe_net": "10.3481",
+    "max_drawdown_net": "0.008881"
+  },
+  "assets": {
+    "BTCUSDT": {
+      "2022": {"net_notional": "0.021646", "mark_excursion": "0.0357"},
+      "2023": {"net_notional": "0.140836", "mark_excursion": "1.6796"},
+      "2024": {"net_notional": "0.188252", "mark_excursion": "1.5415"},
+      "2025": {"net_notional": "0.051331", "mark_excursion": "0.3411"}
+    },
+    "ETHUSDT": {
+      "2022": {"net_notional": "0.003180", "mark_excursion": "0.0499"},
+      "2023": {"net_notional": "0.122957", "mark_excursion": "1.0422"},
+      "2024": {"net_notional": "0.180084", "mark_excursion": "0.7949"},
+      "2025": {"net_notional": "0.041823", "mark_excursion": "0.4492"}
+    }
+  },
+  "notes": [
+    "mark_excursion es el diagnostico anual 04C-2 de maxima excursion adversa de mark respecto al inicio; se usa como lower bound de stress de un short estatico.",
+    "Estos valores no se recalculan ni optimizan en 04D-1.",
+    "El lower bound de margen ignora maintenance margin, fees y basis mark/index, por lo que es favorable y no una garantia de supervivencia."
+  ]
+}
