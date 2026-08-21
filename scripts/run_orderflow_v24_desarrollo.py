@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -40,7 +40,7 @@ from backend.economia.protocolo_orderflow_v24 import (
 )
 
 SALIDA = RAIZ / "artifacts" / "orderflow-v24-desarrollo-2022-2025.json"
-MAX_WORKERS_AGGTRADES = 4
+MAX_WORKERS_AGGTRADES = 2
 MAX_WORKERS_SPOT = 8
 _LOCAL = threading.local()
 
@@ -87,7 +87,9 @@ def _descargar_spot(symbol: str):
 
 def _descargar_tareas(tareas):
     resultados = {}
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS_AGGTRADES) as pool:
+    # Dos procesos: el hot path es CPU-bound y el runner hosted ofrece pocos
+    # cores. Cada proceso mantiene su propia Session y solo devuelve agregados.
+    with ProcessPoolExecutor(max_workers=MAX_WORKERS_AGGTRADES) as pool:
         futuros = {pool.submit(_descargar_flow, a): a for a in tareas}
         for i, fut in enumerate(as_completed(futuros), 1):
             a = futuros[fut]
