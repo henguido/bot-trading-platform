@@ -24,8 +24,10 @@ from backend.economia.protocolo_carry_04c2 import (
     BINANCE_DATA_04C2,
     CAPITAL_REFERENCIA_MULTIPLO_04C2,
     COBERTURA_ALINEADA_MIN_04C2,
+    DAILY_ARCHIVE_FALLBACK_04C2,
     DESDE_04C2,
     DRAG_ANUAL_NOTIONAL_04C2,
+    FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2,
     HASTA_EXCLUSIVO_04C2,
     MAX_DRAWDOWN_ECONOMICO_04C2,
     MAX_DRAWDOWN_PROD_04C2,
@@ -146,6 +148,20 @@ def _ms(raw: str) -> int:
     return value // 1000 if value >= 100_000_000_000_000 else value
 
 
+def _normalizar_funding_ts_04c2(raw_ts: int) -> int:
+    """Mapea fundingTime al inicio de su hora nominal solo dentro del gate pre-PnL.
+
+    Auditoría completa 2022-2025 previa a PnL: 8,766 eventos BTC/ETH,
+    offset máximo 31 ms y p99 22 ms. Cualquier offset >1 s falla cerrado.
+    """
+    if raw_ts < 0:
+        raise ValueError("funding timestamp negativo")
+    offset = raw_ts % _HORA_MS
+    if offset > FUNDING_ALIGNMENT_MAX_OFFSET_MS_04C2:
+        raise ValueError(f"funding timestamp fuera de tolerancia: offset_ms={offset}")
+    return raw_ts - offset
+
+
 def _iter_months() -> Iterable[Tuple[int, int]]:
     for year in ANIOS_04C2:
         for month in range(1, 13):
@@ -163,6 +179,14 @@ def _url(kind: str, symbol: str, year: int, month: int) -> str:
     if kind == "funding":
         return f"{BINANCE_DATA_04C2}/futures/um/monthly/fundingRate/{symbol}/{symbol}-fundingRate-{ym}.zip"
     raise ValueError(f"kind desconocido: {kind}")
+
+
+def _daily_mark_url(symbol: str, dt: date) -> str:
+    ds = dt.isoformat()
+    return (
+        f"{BINANCE_DATA_04C2}/futures/um/daily/markPriceKlines/"
+        f"{symbol}/1h/{symbol}-1h-{ds}.zip"
+    )
 
 
 def _download(url: str) -> bytes:
@@ -222,19 +246,52 @@ def parse_funding_04c2(payload: bytes) -> Tuple[EventoFunding04C2, ...]:
         if not row:
             continue
         try:
-            ts = int(row[0])
+            raw_ts = int(row[0])
             interval = int(row[1])
         except (ValueError, TypeError):
             continue  # header
-        if len(row) < 3 or ts < 0 or interval <= 0:
+        if len(row) < 3 or raw_ts < 0 or interval <= 0:
             raise ValueError("funding incompleto/invalido")
+        ts = _normalizar_funding_ts_04c2(raw_ts)
         rate = _d(row[2], "funding_rate")
         if ts in seen:
-            raise ValueError("funding timestamp duplicado")
+            raise ValueError("funding timestamp normalizado duplicado")
         seen.add(ts)
         out.append(EventoFunding04C2(ts, interval, rate))
     out.sort(key=lambda x: x.ts_ms)
     return tuple(out)
+
+
+def _completar_mark_diario_04c2(
+    symbol: str,
+    funding: Sequence[EventoFunding04C2],
+    mark: Dict[int, PuntoPrecio04C2],
+    errors: list[str],
+) -> None:
+    """Recupera solo huecos mark en funding hours desde el archivo daily oficial.
+
+    No interpola. Si el daily no existe o tampoco contiene la hora, se deja el
+    hueco para que el gate de datos falle cerrado.
+    """
+    if not DAILY_ARCHIVE_FALLBACK_04C2:
+        return
+    missing_ts = sorted({e.ts_ms for e in funding if e.ts_ms not in mark})
+    if not missing_ts:
+        return
+    by_day: Dict[date, list[int]] = defaultdict(list)
+    for ts in missing_ts:
+        dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+        by_day[dt.date()].append(ts)
+    for day, wanted in sorted(by_day.items()):
+        url = _daily_mark_url(symbol, day)
+        try:
+            rows = parse_klines_04c2(_download(url))
+        except Exception as exc:
+            errors.append(f"daily_mark:{day}:{type(exc).__name__}:{exc}:{url}")
+            continue
+        for ts in wanted:
+            if ts in rows:
+                mark[ts] = rows[ts]
 
 
 def cargar_serie_remota_04c2(symbol: str) -> SerieSimbolo04C2:
@@ -246,7 +303,7 @@ def cargar_serie_remota_04c2(symbol: str) -> SerieSimbolo04C2:
             tasks.append((kind, year, month, _url(kind, symbol, year, month)))
 
     payloads: Dict[Tuple[str, int, int], bytes] = {}
-    errors = []
+    errors: list[str] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS_04C2) as pool:
         futures = {pool.submit(_download, url): (kind, year, month, url) for kind, year, month, url in tasks}
         for fut in as_completed(futures):
@@ -286,6 +343,7 @@ def cargar_serie_remota_04c2(symbol: str) -> SerieSimbolo04C2:
             errors.append(f"parse:{kind}:{year:04d}-{month:02d}:{type(exc).__name__}:{exc}")
 
     funding.sort(key=lambda x: x.ts_ms)
+    _completar_mark_diario_04c2(symbol, funding, mark, errors)
     return SerieSimbolo04C2(
         symbol=symbol,
         funding=tuple(funding),
