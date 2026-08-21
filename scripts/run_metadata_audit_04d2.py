@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from backend.economia.auditoria_metadata_04d2 import ejecutar_auditoria_metadata_04d2
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.economia.auditoria_metadata_04d2 import ejecutar_auditoria_metadata_04d2  # noqa: E402
 
 
 def main() -> int:
@@ -15,13 +20,11 @@ def main() -> int:
     if result.reasons:
         print(f"[04D-2] reasons={' | '.join(result.reasons)}")
 
-    # Solo persiste la respuesta si se ejecutó explícitamente. CI sin secrets deja
-    # un artefacto de estado, nunca metadata de cuenta.
-    artifact = Path("artifacts/metadata-account-04d2.json")
+    artifact = ROOT / "artifacts" / "metadata-account-04d2.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(result)
     artifact.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
-    print(f"[04D-2] artifact={artifact.resolve()}")
+    print(f"[04D-2] artifact={artifact}")
     return 0
 
 
