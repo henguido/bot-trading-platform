@@ -2,11 +2,15 @@
 
 ## Estado
 
-**PREDECLARADO — congelado antes de calcular PnL 04C-2.**
+**PREDECLARADO — parámetros económicos congelados antes de calcular PnL 04C-2.**
 
 04C-1 confirmó que existe carry agregado en futuros trimestrales, pero la realización por `deliveryPrice` no fue suficientemente estable. 04C-2 prueba una estrategia materialmente distinta y más cercana a la literatura de perpetuals: **long Spot + short USD-M perpetual con igual cantidad de activo base**, mantenida de forma continua y medida en los settlements reales de funding.
 
 No se usa funding para predecir Spot. El funding es directamente una fuente de cash-flow de la posición short perpetual.
+
+Antes de observar PnL 04C-2 se hizo una auditoría exclusivamente temporal de los 8,766 `fundingTime` BTC/ETH 2022-2025. Encontró offset máximo de 31 ms respecto a la hora nominal y p99 de 22 ms en ambos activos. Sobre esa evidencia, y todavía sin PnL, se fijó una regla determinista: normalizar hacia abajo a la hora nominal únicamente si el offset es <=1,000 ms; cualquier offset mayor falla cerrado.
+
+La misma auditoría detectó que los únicos huecos restantes en horas de funding provenían de `markPriceKlines` mensuales: 9 BTC y 6 ETH, concentrados en 2022-07-31, 2022-10-02 y 2023-02-24. Binance publica también archivos diarios oficiales de `markPriceKlines`; 04C-2 puede usarlos exclusivamente como fallback de la misma serie cuando el mensual carece de una hora. Esto **no es imputación**: la observación debe existir literalmente en el archivo diario o el gate sigue fallando.
 
 ## Referencias externas
 
@@ -40,11 +44,21 @@ Fuentes públicas Binance Vision:
 - `spot/monthly/klines/{symbol}/1h`;
 - `futures/um/monthly/klines/{symbol}/1h`;
 - `futures/um/monthly/markPriceKlines/{symbol}/1h`;
-- `futures/um/monthly/fundingRate/{symbol}`.
+- `futures/um/monthly/fundingRate/{symbol}`;
+- fallback permitido solo para huecos reales del mensual: `futures/um/daily/markPriceKlines/{symbol}/1h`.
 
 Se conservan los settlements reales publicados en funding history. **No se presupone una cadencia fija de 8h**; se usa `funding_interval_hours` del archivo.
 
-Para cada evento de funding debe existir exactamente una observación 1h Spot, perpetual y mark price en el mismo timestamp UTC. Si el timestamp no cae exactamente en una vela 1h o falta cualquier pata, se considera no alineado; no se interpola.
+Alineación temporal pre-PnL:
+
+1. conservar el `funding_interval_hours` y `last_funding_rate` originales;
+2. calcular `offset = fundingTime % 3,600,000`;
+3. si `offset <= 1,000 ms`, usar como clave de mercado `fundingTime - offset`;
+4. si `offset > 1,000 ms`, rechazar el dato;
+5. después de normalizar, timestamps duplicados fallan cerrado;
+6. Spot, perpetual y mark deben existir en esa hora nominal;
+7. si solo falta mark en el mensual, se consulta el archivo diario oficial del mismo símbolo/día/intervalo y se usa únicamente si contiene exactamente esa hora;
+8. no se interpola, forward-fill, backward-fill ni sintetiza ningún precio.
 
 ## Construcción de la posición
 
@@ -143,11 +157,13 @@ No se usan retornos diarios para seleccionar periodos.
 
 1. falta algún mes de funding BTC o ETH;
 2. cobertura de eventos alineados Spot+Perp+Mark < 99% por activo;
-3. existe timestamp de funding duplicado;
+3. existe timestamp de funding normalizado duplicado;
 4. existe evento fuera de 2022-2025;
 5. precio/mark no positivo o no finito;
 6. falta cualquiera de los cuatro años en BTC o ETH;
-7. existe un salto entre settlements alineados que no coincide con el `funding_interval_hours` publicado para el settlement final.
+7. existe un salto entre settlements alineados que no coincide con el `funding_interval_hours` publicado para el settlement final;
+8. algún `fundingTime` tiene offset >1 segundo respecto de la hora nominal;
+9. un fallback diario requerido falla o no contiene la observación exacta solicitada.
 
 Sin imputación.
 
@@ -171,7 +187,7 @@ Sin imputación.
 3. Sharpe diario neto anualizado >= **2.0**;
 4. max drawdown diario neto <= **7.5%**.
 
-Estos thresholds se fijan **antes** del PnL para evitar desplegar una estrategia que sea positiva pero demasiado débil para compensar riesgo de exchange, custodia, margen y operación.
+Estos thresholds se fijaron **antes** del PnL para evitar desplegar una estrategia que sea positiva pero demasiado débil para compensar riesgo de exchange, custodia, margen y operación.
 
 Si pasa el gate económico pero no el de producción, no se baja ningún threshold: se documenta como prima real pero insuficiente para producción bajo este protocolo.
 
@@ -198,6 +214,9 @@ Si pasa el gate económico pero no el de producción, no se baja ningún thresho
 - no cambiar 60 bps/año;
 - no cambiar equal-weight;
 - no cambiar thresholds tras observar resultados;
+- no ampliar la tolerancia temporal >1 segundo;
+- no usar fuentes distintas de Binance Vision para completar market data;
+- no interpolar huecos;
 - no añadir leverage;
 - no optimizar hedge ratio;
 - no altcoins;
