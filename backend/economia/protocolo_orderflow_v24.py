@@ -28,6 +28,11 @@ N_FECHAS_FEATURE_V24 = 96
 DEFINICION_OFI_V24 = "(taker_buy_quote-taker_sell_quote)/(taker_buy_quote+taker_sell_quote)"
 RETORNO_CONTEMPORANEO_V24 = "open(T+1d)/open(T)-1"
 RESIDUALIZACION_V24 = "OLS_cross_section_OFI_sobre_retorno_contemporaneo_con_intercepto"
+# Decisión de implementación fijada antes del resultado económico: para poder
+# reducir cientos de millones de filas dentro del gate temporal de CI, precio,
+# cantidad y acumuladores quote usan IEEE-754 float64 por archivo. Los agregados
+# finales se convierten a Decimal antes de calcular OFI/rankings/evaluación.
+ARITMETICA_AGGTRADES_V24 = "IEEE754_float64_por_archivo_luego_Decimal"
 PERMITE_WINSORIZACION_V24 = False
 PERMITE_CLIPPING_V24 = False
 
