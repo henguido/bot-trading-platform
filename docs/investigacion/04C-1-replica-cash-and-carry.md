@@ -1,185 +1,111 @@
 # BOT 2.0 — 04C-1 Réplica cash-and-carry BTC/ETH
 
-## Estado
+## Estado final
 
-**PREDECLARADO — especificación congelada antes de descargar precios de entrada/salida o calcular PnL 04C-1.**
+**`CARRY_FALSADO_04C1` — datos completos y PnL agregado positivo, pero la réplica no supera los gates predeclarados de estabilidad.**
 
-04C-0 resultó `DATASET_CARRY_APTO_04C0`: Spot BTC/ETH 48/48 meses, 32 futuros fechados USD-M (16 BTC + 16 ETH), cuatro vencimientos por año/subyacente 2022–2025, continuidad trade-price y mark-price 100%.
+04C-0 había resultado `DATASET_CARRY_APTO_04C0`. 04C-1 mantuvo exactamente la especificación congelada antes del PnL: 32 contratos BTC/ETH, entrada 28 días antes a 08:00 UTC, long Spot + short futuro fechado con igual notional, hurdle all-in fijo de 60 bps, reserva Futures de 1x notional y stress de margen de 50%.
 
-04C-1 prueba una sola metodología: **long Spot + short futuro fechado USD-M con el mismo notional**, aproximadamente un mes antes de expiración. No predice dirección del Spot.
+## Resultado reproducible
+
+Workflow válido: `research-04c1` run #3 sobre HEAD ejecutable `5aaa1434c9f1977b354e71a5551fa9343876510d`.
+
+- 32/32 contratos con datos completos;
+- 9/32 contratos superaron `basis > 60 bps`;
+- años con operaciones: 2023, 2024 y 2025;
+- PnL neto agregado: **positivo**, `1048.83306` unidades de PnL por las unidades base usadas en la réplica;
+- media `net_notional`: **+0.173741%** por operación elegible;
+- media anualizada simple sobre capital comprometido: **+1.132421%**;
+- 6/9 operaciones net-positive = **66.667%**;
+- operaciones con stress de margen >=50%: **0**;
+- BTC diagnóstico neto: `+1029.58362`;
+- ETH diagnóstico neto: `+19.24944`.
+
+Resultado por año:
+
+- 2022: 0 operaciones, PnL 0;
+- 2023: 2 operaciones, PnL neto **-41.97092**;
+- 2024: 6 operaciones, PnL neto **+1171.15158**;
+- 2025: 1 operación, PnL neto **-80.34760**.
+
+Motivos de rechazo exactos:
+
+- `FRACCION_OPERACIONES_POSITIVAS_INSUFICIENTE`;
+- `ANIO_CON_OPERACIONES_PNL_NEGATIVO`.
+
+El gate exigía >=75% de operaciones ganadoras y ningún año activo con PnL agregado negativo. No se modifican retrospectivamente.
+
+## Operaciones elegibles
+
+BTC:
+
+- `BTCUSDT_231229`: basis 81.6911 bps, net_notional -0.0829%, annualized committed -0.5402%, margin drawdown 16.8829%;
+- `BTCUSDT_240329`: basis 171.3872 bps, net_notional +0.5320%, annualized committed +3.4673%, margin drawdown 20.4020%;
+- `BTCUSDT_240628`: basis 84.8845 bps, net_notional +0.0593%, annualized committed +0.3868%, margin drawdown 5.6217%;
+- `BTCUSDT_241227`: basis 147.6653 bps, net_notional +0.8098%, annualized committed +5.2781%, margin drawdown 12.3503%;
+- `BTCUSDT_250328`: basis 61.1959 bps, net_notional -0.1014%, annualized committed -0.6612%, margin drawdown 19.7245%.
+
+ETH:
+
+- `ETHUSDT_231229`: basis 80.7554 bps, net_notional -0.4911%, annualized committed -3.2006%, margin drawdown 16.2305%;
+- `ETHUSDT_240329`: basis 172.5793 bps, net_notional +0.1440%, annualized committed +0.9388%, margin drawdown 22.2384%;
+- `ETHUSDT_240628`: basis 93.8025 bps, net_notional +0.0449%, annualized committed +0.2928%, margin drawdown 4.2242%;
+- `ETHUSDT_241227`: basis 160.4740 bps, net_notional +0.6490%, annualized committed +4.2299%, margin drawdown 15.3421%.
+
+## Qué aprendimos
+
+La falsación **no** significa que el crypto carry no exista. La réplica mostró:
+
+1. basis ex ante suficientemente amplio en nueve vencimientos;
+2. PnL agregado positivo después del buffer conservador;
+3. media de retorno positiva;
+4. cero incumplimientos del stress de margen a 1x;
+5. pero insuficiente consistencia temporal.
+
+Las pérdidas de 2023 y 2025 no se explican por liquidación. El diagnóstico muestra una fricción de realización: el `deliveryPrice` del futuro y el Spot ejecutable exactamente a las 08:00 UTC no coinciden. En el modelo textbook, el payoff depende de convergencia `F_T = S_T`; en una implementación cash-settled el índice de settlement y el precio ejecutable Spot pueden presentar tracking difference alrededor del fix. Esa diferencia puede consumir un basis pequeño incluso cuando el basis inicial supera el buffer de costos.
+
+Este diagnóstico **no permite rescatar 04C-1** cambiando la hora, el hurdle o escogiendo solo BTC. La versión queda falsada tal como fue predeclarada.
 
 ## Referencia externa
 
-La referencia principal es Schmeling, Schrimpf y Todorov, *Crypto Carry* (Management Science, online 6-may-2026; BIS Working Paper 1087). El trabajo estudia carry en BTC/ETH y cash-and-carry con futuros de vencimiento fijo. Su análisis de riesgo usa una entrada aproximadamente 19 días hábiles CME / 28 días calendario antes de vencimiento y destaca que la convergencia al settlement no elimina el riesgo de margin call/liquidación previo.
+Schmeling, Schrimpf y Todorov, *Crypto Carry* (Management Science, online 6-may-2026; BIS Working Paper 1087) estudian BTC/ETH fixed-maturity carry. Su configuración textbook es long Spot / short Futures cuando carry positivo y suficientemente grande para cubrir costos. También muestran que las dos patas deben financiarse separadamente y que la pata short Futures puede sufrir drawdowns severos antes de convergencia.
 
-Binance publica:
+El paper construye series de basis de madurez constante de uno y tres meses; su análisis de riesgo toma posiciones aproximadamente 28 días antes de expiración. La siguiente investigación, si se realiza, debe aproximar mejor una **posición de carry continua/rolada** en lugar de forzar venta y recompra de Spot en cada settlement.
 
-- contratos USDⓈ-M trimestrales BTC/ETH con settlement en USDT;
-- vencimiento/settlement a las 08:00 UTC;
-- un endpoint público `GET /futures/data/delivery-price` para settlement histórico;
-- Spot/Futures/mark-price históricos en Binance Public Data;
-- leverage Futures desde 1x, sujeto al símbolo/cuenta.
+## Costos y ejecución usados
 
-## Universo y observaciones
+- hurdle all-in fijo: 60 bps sobre notional Spot;
+- sin BNB discount;
+- sin maker fill garantizado;
+- sin VIP favorable;
+- collateral Futures de referencia igual al notional Spot;
+- capital comprometido de referencia `2*S0`;
+- sin Portfolio Margin/cross-collateral;
+- settlement oficial Binance congelado antes del PnL para evitar HTTP 451 de GitHub-hosted Actions;
+- markPrice hourly para stress de margen.
 
-Se usan exactamente los 32 contratos descubiertos en 04C-0:
+El primer intento real del workflow no produjo resultado económico porque `fapi.binance.com` devolvió HTTP 451 desde GitHub Actions. Los 32 `deliveryPrice` oficiales se capturaron antes del PnL y se congelaron en `backend/economia/data/carry_04c1_delivery_prices.json`; el run #3 es el resultado válido.
 
-- BTC: 16 contratos trimestrales 2022–2025;
-- ETH: 16 contratos trimestrales 2022–2025;
-- cuatro vencimientos por año/subyacente;
-- 2026 cerrado.
+## Validación de ingeniería
 
-No se añaden altcoins ni perpetuos en 04C-1.
+- locks 04C-1: OK;
+- 6 tests dedicados: passed;
+- CI general: **1147 tests passed**, 1391 warnings;
+- `compileall backend`: OK;
+- frontend build: 841 módulos;
+- v20.1: `DATASET_POSICIONAMIENTO_APTO_V20A`.
 
-## Momento de entrada
-
-Para cada contrato con fecha de expiración `E`:
-
-- `T = E - 28 días calendario`;
-- hora de entrada: **08:00 UTC**;
-- `S0`: open de la vela Spot 1h que comienza en T 08:00 UTC;
-- `F0`: open de la vela del futuro fechado 1h que comienza en T 08:00 UTC;
-- `M(t)`: mark-price hourly desde T 08:00 UTC hasta antes del settlement.
-
-No se busca la mejor hora del día ni otro número de días.
-
-## Señal económica
-
-Basis de entrada:
-
-`basis_bps = (F0 / S0 - 1) * 10,000`
-
-Solo se abre cash-and-carry si:
-
-`basis_bps > 60 bps`
-
-Los 60 bps son un **hurdle all-in conservador predeclarado**, no un estimado optimizado retrospectivamente. Se usa porque la comisión real histórica de Futures depende de VIP/cuenta/promociones y no puede reconstruirse fielmente sin datos privados. El hurdle debe cubrir conjuntamente trading fees, delivery/settlement, spread, slippage y margen de seguridad.
-
-Referencia de conservadurismo:
-
-- Binance publica actualmente 0.10% por lado para usuario regular Spot antes de descuentos;
-- las comisiones Futures dependen de maker/taker y nivel de cuenta;
-- mantener una posición hasta delivery puede añadir costo de settlement;
-- el backtest no asumirá BNB discount, maker fill garantizado ni VIP.
-
-No se probarán hurdles alternativos dentro de 04C-1.
-
-## Construcción de la posición
-
-Por cada unidad de activo base elegible:
-
-- comprar `1` unidad Spot a `S0`;
-- vender `1` unidad del futuro fechado a `F0`;
-- reservar collateral Futures igual a `S0` (modelo de investigación equivalente a **1x de notional inicial**, sin borrowing);
-- capital comprometido de referencia: `2 * S0` = capital Spot + reserva Futures.
-
-No se reutilizan ganancias Spot como margen intradía. El modelo deliberadamente no supone Portfolio Margin ni cross-collateral entre Spot y Futures.
-
-## Settlement y salida
-
-A la expiración `E`:
-
-- el futuro se liquida usando el `deliveryPrice` oficial de Binance para el par y `deliveryTime` correspondiente;
-- la pata Spot se vende al open de la vela Spot 1h que comienza en **E 08:00 UTC**;
-- no se cierra manualmente el futuro antes del delivery;
-- no se abre una nueva posición durante los diez minutos previos al delivery.
-
-PnL bruto por unidad base:
-
-`spot_pnl = S1 - S0`
-
-`future_pnl = F0 - D`
-
-`gross_pnl = spot_pnl + future_pnl`
-
-`cost_buffer = 0.006 * S0`
-
-`net_pnl = gross_pnl - cost_buffer`
-
-Retorno neto sobre notional Spot:
-
-`net_notional = net_pnl / S0`
-
-Retorno neto sobre capital comprometido:
-
-`net_committed_capital = net_pnl / (2 * S0)`
-
-Para comparabilidad se reportará annualización simple a 28 días:
-
-`annualized_committed = net_committed_capital * 365 / 28`
-
-## Riesgo de margen predeclarado
-
-El futuro short se sigue con `markPriceKlines`.
-
-Adversidad máxima de la pata Futures respecto a la reserva inicial:
-
-`max_margin_drawdown = max(0, max(M(t) - F0) / S0)`
-
-04C-1 no pretende reproducir históricamente las tablas exactas de maintenance margin/VIP/risk tier de cada fecha. En su lugar aplica un buffer operacional deliberadamente severo:
-
-- si `max_margin_drawdown >= 50%` en una operación, esa operación incumple el gate de seguridad;
-- no se incrementa leverage para rescatar retorno sobre capital;
-- no se supone que la ganancia Spot esté disponible automáticamente para evitar liquidación.
-
-Esto no equivale a calcular el liquidation price exacto de una cuenta Binance histórica; es un stress gate conservador de la réplica.
-
-## Gate de datos
-
-04C-1 es `DATOS_INSUFICIENTES_04C1` si no se puede obtener para los 32 contratos:
-
-- S0 Spot;
-- F0 future;
-- S1 Spot;
-- deliveryPrice oficial;
-- mark-price path completo entre entrada y expiración.
-
-No se imputan observaciones ni se sustituyen contratos.
-
-## Gate económico predeclarado
-
-La réplica será `CARRY_APTO_04C1` únicamente si simultáneamente:
-
-1. al menos 8 de los 32 contratos superan ex ante el hurdle de 60 bps;
-2. hay operaciones elegibles en al menos 3 de los 4 años;
-3. PnL neto agregado de todas las operaciones elegibles > 0;
-4. media de `net_notional` > 0;
-5. media de `annualized_committed` > 0;
-6. al menos 75% de las operaciones elegibles tienen `net_pnl > 0`;
-7. cada año que tenga operaciones elegibles presenta PnL neto agregado no negativo;
-8. ninguna operación elegible alcanza `max_margin_drawdown >= 50%`.
-
-Se reportan BTC y ETH separados, pero no se permite declarar éxito seleccionando retrospectivamente solo uno de los dos. El gate primario es conjunto.
-
-## Diagnósticos obligatorios, no criterios de rescate
-
-Se reportará:
-
-- basis de entrada por contrato;
-- gross y net PnL;
-- retorno sobre notional y sobre capital comprometido;
-- annualización simple;
-- tracking difference al settlement `S1 - D`;
-- máxima adversidad mark-to-market Futures;
-- número de operaciones por año y subyacente;
-- resultados BTC-only y ETH-only solo como diagnóstico;
-- contratos que no superan 60 bps se registran como `CASH`.
-
-Ningún diagnóstico permite cambiar el gate después del resultado.
-
-## Candados
+## Candados preservados
 
 - no cambiar 28 días;
 - no cambiar 08:00 UTC;
-- no cambiar hurdle de 60 bps;
+- no bajar hurdle de 60 bps;
 - no cambiar BTC/ETH;
-- no eliminar 2022 u otro año;
-- no seleccionar solo BTC o solo ETH tras observar resultados;
-- no probar reverse carry;
-- no probar leverage >1x;
-- no asumir cross/portfolio margin;
-- no BNB discount;
-- no maker fill garantizado;
+- no eliminar años;
+- no seleccionar BTC-only tras observar resultado;
+- no reverse carry;
+- no leverage >1x;
+- no cross/portfolio margin;
 - no imputación;
 - no 2026;
 - no mayo-julio 2026;
@@ -187,9 +113,11 @@ Ningún diagnóstico permite cambiar el gate después del resultado.
 - sin PAPER operativo;
 - sin LIVE;
 - sin Render;
-- sin GPT para decisión de entrada;
-- no mergear mientras sea investigación.
+- sin GPT para decidir entradas;
+- no mergear esta rama.
 
-## Interpretación
+## Decisión
 
-04C-1 no busca una correlación predictiva: pregunta si el basis observable 28 días antes de expiry deja una ganancia delta-neutral económicamente positiva **después de un hurdle conservador y con suficiente headroom de margen**. Si falla, no se rescata bajando costos, aumentando leverage o moviendo la fecha de entrada dentro de esta versión.
+**04C-1 queda cerrada como falsada por estabilidad, no por ausencia de carry.**
+
+La siguiente fase no debe ajustar 04C-1. Una posible 04C-2 deberá ser una metodología distinta y predeclarada, apoyada por la literatura: mantener la pata Spot y **rolar** futuros de vencimiento fijo/constant-maturity para reducir churn de Spot y separar el carry estructural del tracking puntual del settlement. Debe definir de antemano la regla de roll, costos por roll, capital y stress de margen antes de leer nuevos PnL.
