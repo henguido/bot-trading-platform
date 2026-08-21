@@ -4,6 +4,7 @@ import json
 import sys
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -42,16 +43,30 @@ def _diagnostico_timestamp(s):
     within_5m = sum(o <= _TOL_DIAGNOSTICO_MS for o in offsets)
     floored_aligned = 0
     normalized_times = []
+    missing = Counter()
+    missing_rows = []
     for e in s.funding:
         floor_ts = e.ts_ms - (e.ts_ms % _HORA_MS)
         if e.ts_ms - floor_ts <= _TOL_DIAGNOSTICO_MS:
             normalized_times.append((floor_ts, e.interval_hours))
-            if floor_ts in s.spot and floor_ts in s.perp and floor_ts in s.mark:
+            absent = []
+            if floor_ts not in s.spot:
+                absent.append("spot")
+                missing["spot"] += 1
+            if floor_ts not in s.perp:
+                absent.append("perp")
+                missing["perp"] += 1
+            if floor_ts not in s.mark:
+                absent.append("mark")
+                missing["mark"] += 1
+            if not absent:
                 floored_aligned += 1
+            else:
+                missing_rows.append(
+                    f"{datetime.fromtimestamp(floor_ts / 1000, tz=timezone.utc).isoformat()}:{'+'.join(absent)}"
+                )
     normalized_gap_errors = 0
     for (prev_ts, _), (cur_ts, interval) in zip(normalized_times, normalized_times[1:]):
-        # no cruzar año en el diagnóstico de continuidad
-        from datetime import datetime, timezone
         py = datetime.fromtimestamp(prev_ts / 1000, tz=timezone.utc).year
         cy = datetime.fromtimestamp(cur_ts / 1000, tz=timezone.utc).year
         if py == cy and cur_ts - prev_ts != interval * _HORA_MS:
@@ -60,7 +75,8 @@ def _diagnostico_timestamp(s):
         f"[04C-2][timestamp-audit] {s.symbol} offsets_top={counts.most_common(12)} "
         f"p50_ms={p50} p95_ms={p95} p99_ms={p99} max_ms={max_offset} "
         f"within_5m={within_5m}/{len(offsets)} floor_hour_aligned={floored_aligned}/{len(offsets)} "
-        f"floor_hour_gap_errors={normalized_gap_errors}",
+        f"floor_hour_gap_errors={normalized_gap_errors} missing_components={dict(missing)} "
+        f"missing_rows={missing_rows[:30]}",
         flush=True,
     )
 
@@ -77,7 +93,6 @@ def main() -> int:
             f"perp_points={len(s.perp)} mark_points={len(s.mark)} errors={len(s.errores)}",
             flush=True,
         )
-        # Auditoría de semántica temporal solamente. No modifica timestamps ni calcula PnL.
         _diagnostico_timestamp(s)
 
     result = evaluar_carry_04c2(series)
