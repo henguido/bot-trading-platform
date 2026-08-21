@@ -3,7 +3,7 @@
 ## Veredicto
 
 - Liquidez snapshot: `EJECUCION_PUBLICA_APTA_SNAPSHOT_04D1`.
-- Margen estático 2x: `MARGEN_ESTATICO_2X_INSUFICIENTE_04D1`.
+- Margen estático separado 2x: `MARGEN_ESTATICO_2X_INSUFICIENTE_04D1`.
 - Producción: `PRODUCCION_NO_AUTORIZADA_04D1`.
 
 04D-1 no cambia el veredicto económico de 04C-2. Su objetivo fue identificar blockers de ejecución y capital antes de cualquier PAPER operativo o LIVE.
@@ -19,15 +19,15 @@ Fricción estimada del libro, en bps:
 | BTCUSDT | 0.0142 | 0.0142 | 0.0528 | 0.1985 |
 | ETHUSDT | 0.1888 | 0.5102 | 1.8500 | 3.4182 |
 
-Máximo observado: **3.4182 bps**, por debajo del gate congelado de **10 bps**. Por tanto la profundidad observable actual de BTC/ETH no es el blocker principal en estas escalas.
+Máximo observado: **3.4182 bps**, por debajo del gate congelado de **10 bps**. La profundidad observable actual de BTC/ETH no es el blocker principal en estas escalas.
 
 Limitación: es un snapshot puntual, no una distribución histórica de slippage. El runner de GitHub pudo usar el host público alternativo de Spot, pero `fapi.binance.com` respondió HTTP 451 por geofencing. El snapshot final se obtuvo mediante las herramientas públicas conectadas de Binance y quedó fijado en `backend/economia/data/liquidity_snapshot_04d1.json`.
 
 ## Stress histórico de margen
 
-Lower bound deliberadamente favorable, sin maintenance margin, fees ni mark/index basis:
+Lower bound para una arquitectura **separada** long Spot + short Futures, sin reconocer el Spot como collateral del short y sin maintenance margin, fees ni mark/index basis:
 
-| Activo/año | Excursión adversa mark | Capital total mínimo lower-bound |
+| Activo/año | Excursión adversa mark | Capital total mínimo lower-bound separado |
 |---|---:|---:|
 | BTC 2022 | 3.57% | 1.0357x |
 | BTC 2023 | 167.96% | **2.6796x** |
@@ -38,34 +38,38 @@ Lower bound deliberadamente favorable, sin maintenance margin, fees ni mark/inde
 | ETH 2024 | 79.49% | 1.7949x |
 | ETH 2025 | 44.92% | 1.4492x |
 
-La referencia 04C-2 de 2x capital (1x Spot + 1x margen Futures) queda falsada como arquitectura estática segura por BTC 2023, BTC 2024 y ETH 2023.
+La referencia simplificada de 2x (1x Spot + 1x margen Futures separado) queda falsada como arquitectura estática segura por BTC 2023, BTC 2024 y ETH 2023.
 
-## Implicación económica decisiva
+## Implicación correcta
 
-04C-2 ya fallaba el gate de producción con 2x de capital committed:
+04C-2 ya fallaba el gate de producción bajo la referencia 2x committed:
 
 - media anual committed: 4.6882% < 5%;
 - peor año committed: 0.6207% < 2%.
 
-El lower bound histórico demuestra que en algunos episodios el capital de riesgo necesario es **mayor que 2x**. Si el denominador de capital aumenta para mantener el hedge vivo, la rentabilidad sobre capital committed solo empeora. Por tanto, sin cambiar los gates de producción ni usar leverage adicional, obtener maintenance brackets exactos no puede convertir retrospectivamente 04C-2 en candidato de producción.
+Pero 04D-1 **no demuestra** que toda arquitectura de capital deba requerir >2x. Cross Margin, Multi-Assets Mode o Portfolio Margin pueden reconocer collateral compartido y compensaciones económicas entre la pata Spot y la pata short Futures, sujeto a haircuts, maintenance margin y reglas de la cuenta.
 
-Esto no falsifica la prima económica. Falsifica el paso directo de esa prima a producción bajo los gates actuales y una arquitectura prudente de capital.
+Por tanto la conclusión válida es más limitada y más útil: **la arquitectura estática separada 2x no sirve**, pero una arquitectura de collateral compartido todavía debe auditarse antes de cerrar definitivamente la viabilidad productiva del edge.
 
-## Metadata todavía no disponible
+No se permite usar esta observación para añadir leverage especulativo ni para cambiar los gates económicos de 04C-2.
 
-Para un diseño futuro más preciso siguen siendo útiles, pero ya no son necesarias para decidir que 04C-2 no pasa producción bajo el protocolo actual:
+## Metadata todavía necesaria para 04D-2
 
 - fee tier real Spot y USD-M;
 - leverage brackets y maintenance margin;
 - collateral ratios/haircuts de Multi-Assets/Portfolio Margin;
-- margin mode y capacidad real de top-up.
+- margin mode disponible;
+- balances/collateral elegible;
+- reglas efectivas de liquidation y top-up.
 
-La conexión Binance disponible en este entorno expone market data público, no endpoints privados de cuenta para esos campos. No se introducirán credenciales reales en CI ni se inventarán valores.
+La conexión Binance disponible en este entorno expone market data público, no endpoints privados de cuenta para esos campos. La documentación vigente de Binance separa market-data público de account/trade endpoints firmados; 04D-2 deberá mantenerse read-only y nunca introducir credenciales reales en CI.
 
 ## Cierre
 
-`04C-2`: edge económico demostrado, **no candidato a producción**.
+`04C-2`: edge económico demostrado, todavía **no candidato a producción**.
 
-`04D-1`: liquidez pública suficiente en el snapshot hasta $100k, pero **capital/margen es el blocker estructural**.
+`04D-1`: liquidez pública suficiente en el snapshot hasta $100k; **la arquitectura de margen separado es el blocker demostrado**.
+
+Siguiente gate: 04D-2, collateral/margin architecture read-only.
 
 No se habilita PAPER operativo, LIVE ni Render. No se abre 2026. No se recalibran gates de 04C-2.
