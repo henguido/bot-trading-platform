@@ -44,6 +44,7 @@ S3_LIST_URL_V23A = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
 CDN_BASE_V23A = "https://data.binance.vision"
 MAX_KEYS_S3_V23A = 1000
 TIMEOUT_V23A_SEGUNDOS = 45
+MAX_BYTES_TOTAL_MUESTRA_V23A = 1024 * 1024 * 1024  # 1 GiB de seguridad
 
 # Gate de transporte/contenido. No son thresholds económicos.
 FRACCION_MUESTRAS_PARSEADAS_MIN_V23A = Decimal("0.90")
