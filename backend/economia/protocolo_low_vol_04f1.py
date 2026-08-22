@@ -55,6 +55,10 @@ LEVERAGED_BASES_04F1: FrozenSet[str] = frozenset({
     "ETHUP", "ETHDOWN",
     "BTCUP", "BTCDOWN",
 })
+# Compatibilidad con el auditor existente: `endswith` recibe ahora únicamente
+# tickers BLVT completos, no sufijos genéricos. JUP ya no coincide.
+LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = tuple(sorted(LEVERAGED_BASES_04F1))
+
 STABLE_FIAT_BASES_04F1: FrozenSet[str] = frozenset({
     "USDC", "BUSD", "TUSD", "USDP", "DAI", "PAX", "FDUSD", "USDS",
     "USD1", "PYUSD", "USDE", "USUAL", "SUSD", "USDJ", "XUSD", "VAI",
