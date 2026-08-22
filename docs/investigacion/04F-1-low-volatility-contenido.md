@@ -45,9 +45,17 @@ Un archivo inválido no se imputa.
 Se excluyen de una futura cartera:
 
 1. bases fiat/stable predeclaradas (`USDC`, `BUSD`, `TUSD`, `USDP`, `DAI`, `PAX`, `FDUSD`, `USDS`, `USD1`, `PYUSD`, `USDE`, `USUAL`, `SUSD`, `USDJ`, `XUSD`, `VAI`, `UST`, `USTC`, `EUR`, `AEUR`, `EURI`, `EURT`, `GBP`, `AUD`, `BRL`, `BIDR`, `IDRT`, `TRY`, `RUB`, `UAH`, `NGN`, `BVND`);
-2. bases cuyo nombre termina en `UP`, `DOWN`, `BULL` o `BEAR`.
+2. Binance Leveraged Tokens históricos identificados por una **lista explícita de tickers BLVT**, no por sufijos genéricos.
 
 Estas exclusiones son por tipo de instrumento, no por resultado histórico.
+
+### Corrección de clasificación antes del resultado
+
+Durante la ejecución inicial, pero **antes de que el auditor produjera su primer resultado real**, se detectó que la regla preliminar `base.endswith("UP")` podía excluir erróneamente un activo normal como `JUP`. Esa regla se retiró antes de interpretar datos.
+
+Se sustituyó por la lista explícita de 40 tickers BLVT del periodo (`1INCHUP/DOWN`, `XLMUP/DOWN`, `SUSHIUP/DOWN`, `AAVEUP/DOWN`, `BCHUP/DOWN`, `YFIUP/DOWN`, `FILUP/DOWN`, `SXPUP/DOWN`, `UNIUP/DOWN`, `LTCUP/DOWN`, `XRPUP/DOWN`, `DOTUP/DOWN`, `TRXUP/DOWN`, `EOSUP/DOWN`, `XTZUP/DOWN`, `BNBUP/DOWN`, `LINKUP/DOWN`, `ADAUP/DOWN`, `ETHUP/DOWN`, `BTCUP/DOWN`).
+
+La corrección no cambia cobertura, liquidez, número mínimo de activos, periodo, ventana, ni usa retorno/PnL. El primer run queda técnicamente supersedido por el run que contenga esta corrección, aunque el primero llegue a completar.
 
 ## Gate de cobertura PREDECLARADO
 
