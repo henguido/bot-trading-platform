@@ -1,0 +1,87 @@
+name: research-04e2
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-04e2-eth-staking-data-audit
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  staking-data-audit-04e2:
+    if: github.head_ref == 'agent/bot-2.0-04e2-eth-staking-data-audit' || github.ref == 'refs/heads/agent/bot-2.0-04e2-eth-staking-data-audit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04e2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Assert 04E-2 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from backend.economia.protocolo_staking_eth_04e2 import (
+              ANIOS_04E2, SECURITY_REWARD_ENDPOINTS_04E2,
+              CREDENCIALES_PERMITIDAS_04E2, PNL_PERMITIDO_04E2,
+              PAPER_OPERATIVO_PERMITIDO_04E2, LIVE_PERMITIDO_04E2,
+              RENDER_PERMITIDO_04E2, DESARROLLO_2026_ABIERTO_04E2,
+              IMPUTACION_REWARD_PERMITIDA_04E2,
+              USAR_PRECIO_SECUNDARIO_COMO_REWARD_PERMITIDO_04E2,
+          )
+          assert ANIOS_04E2 == (2022, 2023, 2024, 2025)
+          assert SECURITY_REWARD_ENDPOINTS_04E2 == 'USER_DATA'
+          assert CREDENCIALES_PERMITIDAS_04E2 is False
+          assert PNL_PERMITIDO_04E2 is False
+          assert PAPER_OPERATIVO_PERMITIDO_04E2 is False
+          assert LIVE_PERMITIDO_04E2 is False
+          assert RENDER_PERMITIDO_04E2 is False
+          assert DESARROLLO_2026_ABIERTO_04E2 is False
+          assert IMPUTACION_REWARD_PERMITIDA_04E2 is False
+          assert USAR_PRECIO_SECUNDARIO_COMO_REWARD_PERMITIDO_04E2 is False
+          print('04E-2 methodology locks OK')
+          PY
+          grep -q 'NO ES BACKTEST Y NO OBSERVA PnL' docs/investigacion/04E-2-eth-staking-datos.md
+          grep -q 'USER_DATA' docs/investigacion/04E-2-eth-staking-datos.md
+          grep -q '2026 permanece cerrado' docs/investigacion/04E-2-eth-staking-datos.md
+
+      - name: Unit tests 04E-2
+        run: pytest -q tests/test_auditoria_staking_eth_04e2.py
+
+      - name: Run public staking data audit
+        run: |
+          python scripts/run_staking_eth_audit_04e2.py
+          grep -Eq 'MARKET_DATA_APTA_REWARDS_NO_PUBLICOS_04E2|MARKET_DATA_INCOMPLETA_04E2' artifacts/eth-staking-data-audit-04e2.json
+          grep -q '"economic_backtest_allowed": false' artifacts/eth-staking-data-audit-04e2.json
+          grep -q '"credentials_used": false' artifacts/eth-staking-data-audit-04e2.json
+          grep -q '"pnl_calculated": false' artifacts/eth-staking-data-audit-04e2.json
+
+      - name: Upload 04E-2 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: eth-staking-data-audit-04e2
+          path: artifacts/eth-staking-data-audit-04e2.json
+          retention-days: 14
