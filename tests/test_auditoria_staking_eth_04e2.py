@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 
 from backend.economia.auditoria_staking_eth_04e2 import (
-    BarraDiaria04E2,
     ClientePublico04E2,
     CoberturaSimbolo04E2,
     construir_resultado_04e2,
@@ -14,7 +12,7 @@ from backend.economia.auditoria_staking_eth_04e2 import (
 )
 from backend.economia.protocolo_staking_eth_04e2 import (
     STATUS_APTO_MARKET_BLOQUEADO_REWARD_04E2,
-    STATUS_MARKET_INCOMPLETA_04E2,
+    STATUS_MARKET_INCOMPLETO_04E2,
 )
 
 
@@ -93,7 +91,7 @@ def test_market_data_incompleta_si_beth_2022_insuficiente_o_wbeth_tardio():
         _coverage("WBETHETH", first="2023-07-01", last="2025-12-31", bars_2022=0, total=914),
     )
     result = construir_resultado_04e2(coverage)
-    assert result.status == STATUS_MARKET_INCOMPLETA_04E2
+    assert result.status == STATUS_MARKET_INCOMPLETO_04E2
     assert result.market_data_apt is False
     assert "BETH_2022_INSUFICIENTE" in result.reasons
     assert "WBETH_APARECE_DEMASIADO_TARDE" in result.reasons
