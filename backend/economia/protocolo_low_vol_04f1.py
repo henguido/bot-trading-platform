@@ -29,14 +29,37 @@ MIN_SIMBOLOS_ELEGIBLES_POR_HOLD_04F1 = 50
 
 # Exclusiones por tipo de instrumento, no por performance.
 #
-# Binance Leveraged Tokens históricos usan la convención UP/DOWN; tokens
-# leveraged heredados también pueden usar BULL/BEAR. La regla preliminar
-# `endswith("UP")` reveló PRE-RESULT un falso positivo real: JUP. Por eso se
-# mantiene la convención amplia —que cubre BLVT retirados en fechas distintas—
-# pero con una lista explícita de excepciones verificadas. Ninguna decisión usa
-# volatilidad, retorno futuro o PnL.
-LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = ("UP", "DOWN", "BULL", "BEAR")
-LEVERAGED_SUFFIX_EXEMPT_BASES_04F1: FrozenSet[str] = frozenset({"JUP"})
+# PRE-RESULT correction: una heurística `base.endswith("UP")` descartaba por
+# error a JUP. Para la prueba conservadora se usa una lista explícita de 40
+# BLVT documentados. Si existieron BLVT adicionales no incluidos, esta versión
+# es MÁS PERMISIVA y por tanto produce una cota superior del número de activos
+# normales elegibles. Si aun así falla el mínimo de 50, una clasificación más
+# estricta no puede rescatar el gate. No usa retornos ni PnL.
+LEVERAGED_BASES_04F1: FrozenSet[str] = frozenset({
+    "1INCHUP", "1INCHDOWN",
+    "XLMUP", "XLMDOWN",
+    "SUSHIUP", "SUSHIDOWN",
+    "AAVEUP", "AAVEDOWN",
+    "BCHUP", "BCHDOWN",
+    "YFIUP", "YFIDOWN",
+    "FILUP", "FILDOWN",
+    "SXPUP", "SXPDOWN",
+    "UNIUP", "UNIDOWN",
+    "LTCUP", "LTCDOWN",
+    "XRPUP", "XRPDOWN",
+    "DOTUP", "DOTDOWN",
+    "TRXUP", "TRXDOWN",
+    "EOSUP", "EOSDOWN",
+    "XTZUP", "XTZDOWN",
+    "BNBUP", "BNBDOWN",
+    "LINKUP", "LINKDOWN",
+    "ADAUP", "ADADOWN",
+    "ETHUP", "ETHDOWN",
+    "BTCUP", "BTCDOWN",
+})
+# Compatibilidad con el auditor: cada string es un ticker BLVT completo; JUP no
+# coincide con ninguno.
+LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = tuple(sorted(LEVERAGED_BASES_04F1))
 
 STABLE_FIAT_BASES_04F1: FrozenSet[str] = frozenset({
     "USDC", "BUSD", "TUSD", "USDP", "DAI", "PAX", "FDUSD", "USDS",
