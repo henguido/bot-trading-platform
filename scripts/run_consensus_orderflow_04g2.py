@@ -1,6 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
+
+# Cuando se ejecuta como `python scripts/...`, Python añade `scripts/` pero no
+# necesariamente la raíz del repositorio. Este bootstrap solo corrige imports;
+# no modifica datos, protocolo ni parámetros económicos.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from backend.economia.consensus_orderflow_04g2 import run_04g2
 
