@@ -1,0 +1,101 @@
+name: research-04g1
+
+on:
+  pull_request:
+    paths:
+      - 'backend/economia/protocolo_world_orderflow_04g1.py'
+      - 'backend/economia/auditoria_world_orderflow_04g1.py'
+      - 'scripts/run_world_orderflow_content_04g1.py'
+      - 'tests/test_auditoria_world_orderflow_04g1.py'
+      - 'docs/investigacion/04G-1-orderflow-multiquote-contenido.md'
+      - '.github/workflows/research-04g1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  world-orderflow-content-04g1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04g1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04G-1 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from decimal import Decimal
+          from backend.economia.protocolo_world_orderflow_04g1 import (
+              BASES_04G1, QUOTES_04G1, VENTANA_STD_DIAS_04G1,
+              COBERTURA_DIAS_MIN_04G1, FRACCION_DIAS_BUY_SELL_POSITIVOS_MIN_04G1,
+              FRACCION_OF_STD_VALIDO_MIN_04G1, MIN_QUOTES_VALIDOS_POR_BASE_MES_04G1,
+              MIN_BASES_VALIDAS_POR_MES_04G1, N_MESES_OBJETIVO_04G1,
+              AGREGADO_WORLD_PERMITIDO_04G1, CONVERSION_FX_INVENTADA_PERMITIDA_04G1,
+              ML_PERMITIDO_04G1, RETORNO_FUTURO_PERMITIDO_04G1, PNL_PERMITIDO_04G1,
+              CREDENCIALES_PERMITIDAS_04G1, IMPUTACION_PERMITIDA_04G1,
+              PAPER_OPERATIVO_PERMITIDO_04G1, LIVE_PERMITIDO_04G1,
+              RENDER_PERMITIDO_04G1, DESARROLLO_2026_ABIERTO_04G1,
+          )
+          assert len(BASES_04G1) == 20
+          assert len(QUOTES_04G1) == 14
+          assert VENTANA_STD_DIAS_04G1 == 30
+          assert COBERTURA_DIAS_MIN_04G1 == Decimal('0.90')
+          assert FRACCION_DIAS_BUY_SELL_POSITIVOS_MIN_04G1 == Decimal('0.90')
+          assert FRACCION_OF_STD_VALIDO_MIN_04G1 == Decimal('0.90')
+          assert MIN_QUOTES_VALIDOS_POR_BASE_MES_04G1 == 2
+          assert MIN_BASES_VALIDAS_POR_MES_04G1 == 15
+          assert N_MESES_OBJETIVO_04G1 == 48
+          assert AGREGADO_WORLD_PERMITIDO_04G1 is False
+          assert CONVERSION_FX_INVENTADA_PERMITIDA_04G1 is False
+          assert ML_PERMITIDO_04G1 is False
+          assert RETORNO_FUTURO_PERMITIDO_04G1 is False
+          assert PNL_PERMITIDO_04G1 is False
+          assert CREDENCIALES_PERMITIDAS_04G1 is False
+          assert IMPUTACION_PERMITIDA_04G1 is False
+          assert PAPER_OPERATIVO_PERMITIDO_04G1 is False
+          assert LIVE_PERMITIDO_04G1 is False
+          assert RENDER_PERMITIDO_04G1 is False
+          assert DESARROLLO_2026_ABIERTO_04G1 is False
+          print('04G-1 methodology locks OK')
+          PY
+          grep -q '04G-1.*no calcula world order flow' docs/investigacion/04G-1-orderflow-multiquote-contenido.md || grep -q 'no calcula world order flow' docs/investigacion/04G-1-orderflow-multiquote-contenido.md
+          grep -q 'al menos \*\*15 de los 20 activos\*\*' docs/investigacion/04G-1-orderflow-multiquote-contenido.md
+      - name: Unit tests 04G-1
+        run: pytest -q tests/test_auditoria_world_orderflow_04g1.py
+      - name: Run content and semantic audit
+        run: |
+          python scripts/run_world_orderflow_content_04g1.py
+          grep -Eq 'DATASET_OF_DESAGREGADO_APTO_04G1|DATASET_OF_DESAGREGADO_NO_APTO_04G1' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"world_order_flow_calculated": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"fx_conversion_invented": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"ml_trained": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"future_return_calculated": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"pnl_calculated": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"credentials_used": false' artifacts/world-orderflow-content-audit-04g1.json
+          grep -q '"development_2026_open": false' artifacts/world-orderflow-content-audit-04g1.json
+      - name: Upload 04G-1 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-orderflow-content-audit-04g1
+          path: artifacts/world-orderflow-content-audit-04g1.json
+          retention-days: 14
