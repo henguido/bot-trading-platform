@@ -1,0 +1,95 @@
+name: research-04g0
+
+on:
+  pull_request:
+    paths:
+      - 'backend/economia/protocolo_world_orderflow_04g0.py'
+      - 'backend/economia/auditoria_world_orderflow_04g0.py'
+      - 'scripts/run_world_orderflow_audit_04g0.py'
+      - 'tests/test_auditoria_world_orderflow_04g0.py'
+      - 'docs/investigacion/04G-0-world-orderflow-datos.md'
+      - '.github/workflows/research-04g0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  world-orderflow-data-audit-04g0:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      TRADING_MODE: PAPER
+      ALLOW_LIVE_TRADING: ''
+      BINANCE_API_KEY: ''
+      BINANCE_API_SECRET: ''
+      SECRET_KEY: ci-research-only-synthetic-key-04g0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+      - name: Assert 04G-0 methodology locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from backend.economia.protocolo_world_orderflow_04g0 import (
+              BASES_04G0, QUOTES_04G0, MIN_QUOTES_POR_BASE_MES_04G0,
+              MIN_BASES_MULTIQUOTE_POR_MES_04G0, N_MESES_OBJETIVO_04G0,
+              DESCARGAR_CONTENIDO_KLINES_PERMITIDO_04G0,
+              CALCULAR_ORDER_FLOW_PERMITIDO_04G0, ML_PERMITIDO_04G0,
+              RETORNO_FUTURO_PERMITIDO_04G0, PNL_PERMITIDO_04G0,
+              CREDENCIALES_PERMITIDAS_04G0, IMPUTACION_PERMITIDA_04G0,
+              PAPER_OPERATIVO_PERMITIDO_04G0, LIVE_PERMITIDO_04G0,
+              RENDER_PERMITIDO_04G0, DESARROLLO_2026_ABIERTO_04G0,
+          )
+          assert len(BASES_04G0) == 20
+          assert len(QUOTES_04G0) == 14
+          assert MIN_QUOTES_POR_BASE_MES_04G0 == 2
+          assert MIN_BASES_MULTIQUOTE_POR_MES_04G0 == 15
+          assert N_MESES_OBJETIVO_04G0 == 48
+          assert DESCARGAR_CONTENIDO_KLINES_PERMITIDO_04G0 is False
+          assert CALCULAR_ORDER_FLOW_PERMITIDO_04G0 is False
+          assert ML_PERMITIDO_04G0 is False
+          assert RETORNO_FUTURO_PERMITIDO_04G0 is False
+          assert PNL_PERMITIDO_04G0 is False
+          assert CREDENCIALES_PERMITIDAS_04G0 is False
+          assert IMPUTACION_PERMITIDA_04G0 is False
+          assert PAPER_OPERATIVO_PERMITIDO_04G0 is False
+          assert LIVE_PERMITIDO_04G0 is False
+          assert RENDER_PERMITIDO_04G0 is False
+          assert DESARROLLO_2026_ABIERTO_04G0 is False
+          print('04G-0 methodology locks OK')
+          PY
+          grep -q 'Binance no proporciona el dataset internacional exacto' docs/investigacion/04G-0-world-orderflow-datos.md
+          grep -q 'al menos \*\*2 quote pairs\*\*' docs/investigacion/04G-0-world-orderflow-datos.md
+          grep -q 'al menos \*\*15 de los 20 activos\*\*' docs/investigacion/04G-0-world-orderflow-datos.md
+      - name: Unit tests 04G-0
+        run: pytest -q tests/test_auditoria_world_orderflow_04g0.py
+      - name: Run multi-quote archive audit
+        run: |
+          python scripts/run_world_orderflow_audit_04g0.py
+          grep -Eq 'DATASET_MULTIQUOTE_ORDERFLOW_APTO_04G0|DATASET_MULTIQUOTE_ORDERFLOW_NO_APTO_04G0' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"kline_content_downloaded": false' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"order_flow_calculated": false' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"ml_trained": false' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"pnl_calculated": false' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"credentials_used": false' artifacts/world-orderflow-data-audit-04g0.json
+          grep -q '"development_2026_open": false' artifacts/world-orderflow-data-audit-04g0.json
+      - name: Upload 04G-0 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-orderflow-data-audit-04g0
+          path: artifacts/world-orderflow-data-audit-04g0.json
+          retention-days: 14
