@@ -40,6 +40,8 @@ WBETH_PRIMERA_BARRA_MAX_04E2 = datetime(2023, 6, 30, tzinfo=timezone.utc)
 STATUS_APTO_MARKET_BLOQUEADO_REWARD_04E2 = "MARKET_DATA_APTA_REWARDS_NO_PUBLICOS_04E2"
 STATUS_MARKET_INCOMPLETO_04E2 = "MARKET_DATA_INCOMPLETA_04E2"
 
-BINANCE_MARKET_BASE_04E2 = "https://api.binance.com"
+# Host oficial recomendado por Binance para APIs que solo envían market data público.
+# Evita restricciones geográficas del host de trading sin cambiar endpoints/datos.
+BINANCE_MARKET_BASE_04E2 = "https://data-api.binance.vision"
 TIMEOUT_04E2_SEGUNDOS = 30
 REINTENTOS_04E2 = 2
