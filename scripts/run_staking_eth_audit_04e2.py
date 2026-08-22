@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from backend.economia.auditoria_staking_eth_04e2 import ejecutar_auditoria_staking_04e2
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.economia.auditoria_staking_eth_04e2 import ejecutar_auditoria_staking_04e2  # noqa: E402
 
 
 def main() -> int:
@@ -26,7 +31,7 @@ def main() -> int:
     )
     print(f"[04E-2] reasons={','.join(result.reasons)}")
 
-    artifact = Path("artifacts/eth-staking-data-audit-04e2.json")
+    artifact = ROOT / "artifacts" / "eth-staking-data-audit-04e2.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(json.dumps(asdict(result), indent=2, sort_keys=True), encoding="utf-8")
     print(f"[04E-2] artifact={artifact.resolve()}")
