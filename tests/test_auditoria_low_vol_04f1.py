@@ -85,6 +85,8 @@ def test_protocol_locks_and_exclusions():
     assert MIN_SIMBOLOS_ELEGIBLES_POR_HOLD_04F1 == 50
     assert excluded_category_04f1("USDCUSDT") == "STABLE_FIAT"
     assert excluded_category_04f1("BTCUPUSDT") == "LEVERAGED_TOKEN"
+    # JUP es un activo normal: el antiguo endswith('UP') lo excluía por error.
+    assert excluded_category_04f1("JUPUSDT") is None
     assert excluded_category_04f1("BTCUSDT") is None
     assert PNL_PERMITIDO_04F1 is False
     assert VOLATILIDAD_CALCULADA_PERMITIDA_04F1 is False
