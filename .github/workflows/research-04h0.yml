@@ -1,0 +1,95 @@
+name: research-04h0
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/economia/protocolo_crossvenue_funding_04h0.py'
+      - 'backend/economia/auditoria_crossvenue_funding_04h0.py'
+      - 'tests/test_auditoria_crossvenue_funding_04h0.py'
+      - 'scripts/run_crossvenue_funding_audit_04h0.py'
+      - 'docs/investigacion/04H-0-auditoria-funding-crossvenue.md'
+      - '.github/workflows/research-04h0.yml'
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ''
+  BINANCE_API_KEY: ''
+  BINANCE_API_SECRET: ''
+  SECRET_KEY: ci-research-only-synthetic-key-04h0
+
+jobs:
+  crossvenue-funding-audit-04h0:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Assert 04H-0 locks
+        run: |
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          python - <<'PY'
+          from decimal import Decimal
+          from backend.economia.protocolo_crossvenue_funding_04h0 import *
+          assert CANDIDATOS_04H0 == ('BTC','ETH','SOL','XRP','BNB')
+          assert OBLIGATORIOS_04H0 == ('BTC','ETH','SOL')
+          assert ANIOS_04H0 == (2024,2025)
+          assert INTERVALO_PRECIO_04H0 == '8h'
+          assert MIN_CANDIDATOS_COMUNES_04H0 == 3
+          assert FRACCION_SLOTS_HL_FUNDING_MIN_04H0 == Decimal('0.95')
+          assert FRACCION_SLOTS_HL_KLINES_MIN_04H0 == Decimal('0.95')
+          assert FRACCION_MESES_BINANCE_FUNDING_MIN_04H0 == Decimal('0.95')
+          assert FRACCION_MESES_BINANCE_KLINES_MIN_04H0 == Decimal('0.95')
+          assert CALCULAR_SPREAD_FUNDING_PERMITIDO_04H0 is False
+          assert NORMALIZAR_FUNDING_8H_PERMITIDO_04H0 is False
+          assert CALCULAR_PNL_PERMITIDO_04H0 is False
+          assert IMPUTACION_PERMITIDA_04H0 is False
+          assert CREDENCIALES_PERMITIDAS_04H0 is False
+          assert PAPER_OPERATIVO_PERMITIDO_04H0 is False
+          assert LIVE_PERMITIDO_04H0 is False
+          assert RENDER_PERMITIDO_04H0 is False
+          assert DESARROLLO_2026_ABIERTO_04H0 is False
+          print('04H-0 methodology locks OK')
+          PY
+          grep -q 'PRE-PNL / PRE-SPREAD' docs/investigacion/04H-0-auditoria-funding-crossvenue.md
+          grep -q '2026 permanece cerrado' docs/investigacion/04H-0-auditoria-funding-crossvenue.md
+
+      - name: Unit tests 04H-0
+        run: pytest -q tests/test_auditoria_crossvenue_funding_04h0.py
+
+      - name: Run public cross-venue data audit
+        run: |
+          python scripts/run_crossvenue_funding_audit_04h0.py
+          grep -Eq 'DATASET_CROSSVENUE_FUNDING_APTO_04H0|DATASET_CROSSVENUE_FUNDING_NO_APTO_04H0' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"funding_spread_calculated": false' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"funding_normalized_crossvenue": false' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"return_calculated": false' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"pnl_calculated": false' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"credentials_used": false' artifacts/crossvenue-funding-audit-04h0.json
+          grep -q '"development_2026_open": false' artifacts/crossvenue-funding-audit-04h0.json
+
+      - name: Upload 04H-0 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossvenue-funding-audit-04h0
+          path: artifacts/crossvenue-funding-audit-04h0.json
+          retention-days: 14
