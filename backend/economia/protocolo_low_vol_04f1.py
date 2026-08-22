@@ -28,7 +28,33 @@ MEDIANA_QUOTE_VOLUME_30D_MIN_04F1 = Decimal("5000000")
 MIN_SIMBOLOS_ELEGIBLES_POR_HOLD_04F1 = 50
 
 # Exclusiones por tipo de instrumento, no por performance.
-LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = ("UP", "DOWN", "BULL", "BEAR")
+#
+# PRE-RESULT correction: una heurística `base.endswith("UP")` descartaba por
+# error a JUP. Se sustituye por la lista explícita de Binance Leveraged Tokens
+# que cubre el periodo relevante; esto evita inferir el tipo de instrumento por
+# el ticker y NO usa retornos ni el resultado del auditor.
+LEVERAGED_BASES_04F1: FrozenSet[str] = frozenset({
+    "1INCHUP", "1INCHDOWN",
+    "XLMUP", "XLMDOWN",
+    "SUSHIUP", "SUSHIDOWN",
+    "AAVEUP", "AAVEDOWN",
+    "BCHUP", "BCHDOWN",
+    "YFIUP", "YFIDOWN",
+    "FILUP", "FILDOWN",
+    "SXPUP", "SXPDOWN",
+    "UNIUP", "UNIDOWN",
+    "LTCUP", "LTCDOWN",
+    "XRPUP", "XRPDOWN",
+    "DOTUP", "DOTDOWN",
+    "TRXUP", "TRXDOWN",
+    "EOSUP", "EOSDOWN",
+    "XTZUP", "XTZDOWN",
+    "BNBUP", "BNBDOWN",
+    "LINKUP", "LINKDOWN",
+    "ADAUP", "ADADOWN",
+    "ETHUP", "ETHDOWN",
+    "BTCUP", "BTCDOWN",
+})
 STABLE_FIAT_BASES_04F1: FrozenSet[str] = frozenset({
     "USDC", "BUSD", "TUSD", "USDP", "DAI", "PAX", "FDUSD", "USDS",
     "USD1", "PYUSD", "USDE", "USUAL", "SUSD", "USDJ", "XUSD", "VAI",
