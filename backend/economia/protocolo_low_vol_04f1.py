@@ -29,35 +29,14 @@ MIN_SIMBOLOS_ELEGIBLES_POR_HOLD_04F1 = 50
 
 # Exclusiones por tipo de instrumento, no por performance.
 #
-# PRE-RESULT correction: una heurística `base.endswith("UP")` descartaba por
-# error a JUP. Se sustituye por la lista explícita de Binance Leveraged Tokens
-# que cubre el periodo relevante; esto evita inferir el tipo de instrumento por
-# el ticker y NO usa retornos ni el resultado del auditor.
-LEVERAGED_BASES_04F1: FrozenSet[str] = frozenset({
-    "1INCHUP", "1INCHDOWN",
-    "XLMUP", "XLMDOWN",
-    "SUSHIUP", "SUSHIDOWN",
-    "AAVEUP", "AAVEDOWN",
-    "BCHUP", "BCHDOWN",
-    "YFIUP", "YFIDOWN",
-    "FILUP", "FILDOWN",
-    "SXPUP", "SXPDOWN",
-    "UNIUP", "UNIDOWN",
-    "LTCUP", "LTCDOWN",
-    "XRPUP", "XRPDOWN",
-    "DOTUP", "DOTDOWN",
-    "TRXUP", "TRXDOWN",
-    "EOSUP", "EOSDOWN",
-    "XTZUP", "XTZDOWN",
-    "BNBUP", "BNBDOWN",
-    "LINKUP", "LINKDOWN",
-    "ADAUP", "ADADOWN",
-    "ETHUP", "ETHDOWN",
-    "BTCUP", "BTCDOWN",
-})
-# Compatibilidad con el auditor existente: `endswith` recibe ahora únicamente
-# tickers BLVT completos, no sufijos genéricos. JUP ya no coincide.
-LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = tuple(sorted(LEVERAGED_BASES_04F1))
+# Binance Leveraged Tokens históricos usan la convención UP/DOWN; tokens
+# leveraged heredados también pueden usar BULL/BEAR. La regla preliminar
+# `endswith("UP")` reveló PRE-RESULT un falso positivo real: JUP. Por eso se
+# mantiene la convención amplia —que cubre BLVT retirados en fechas distintas—
+# pero con una lista explícita de excepciones verificadas. Ninguna decisión usa
+# volatilidad, retorno futuro o PnL.
+LEVERAGED_SUFFIXES_04F1: Tuple[str, ...] = ("UP", "DOWN", "BULL", "BEAR")
+LEVERAGED_SUFFIX_EXEMPT_BASES_04F1: FrozenSet[str] = frozenset({"JUP"})
 
 STABLE_FIAT_BASES_04F1: FrozenSet[str] = frozenset({
     "USDC", "BUSD", "TUSD", "USDP", "DAI", "PAX", "FDUSD", "USDS",
