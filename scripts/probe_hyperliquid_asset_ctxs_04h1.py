@@ -4,10 +4,15 @@ import csv
 import io
 import json
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import boto3
 import lz4.frame
@@ -24,7 +29,8 @@ from backend.economia.protocolo_crossvenue_carry_04h1 import (
     PROBE_HORAS_ESPERADAS_04H1,
 )
 
-ARTIFACT_PATH = Path("artifacts/hyperliquid-asset-ctxs-probe-04h1.json")
+ARTIFACT_PATH = ROOT / "artifacts/hyperliquid-asset-ctxs-probe-04h1.json"
+DATA_DIR = ROOT / "data/research/04h1/hyperliquid/asset_ctxs"
 AUTH_ENV = "ALLOW_HYPERLIQUID_REQUESTER_PAYS_PROBE"
 ALIASES = {
     "coin": ("coin", "symbol", "asset", "name"),
@@ -164,6 +170,40 @@ def _audit_csv(csv_bytes: bytes, probe_date: str) -> dict:
     return result
 
 
+def _load_or_download(key: str, local_path: Path, base: dict) -> bytes:
+    if local_path.exists():
+        compressed = local_path.read_bytes()
+        base["downloaded_now"] = False
+        base["reused_local_cache"] = True
+        base["compressed_bytes"] = len(compressed)
+        return compressed
+
+    if os.environ.get(AUTH_ENV) != "YES":
+        raise PermissionError(
+            f"No existe cache local y falta {AUTH_ENV}=YES; se rehúsa cualquier llamada requester-pays."
+        )
+
+    s3 = boto3.client("s3")
+    response = s3.get_object(
+        Bucket=HYPERLIQUID_ASSET_CTXS_BUCKET_04H1,
+        Key=key,
+        RequestPayer="requester",
+    )
+    compressed = response["Body"].read()
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = local_path.with_suffix(local_path.suffix + ".tmp")
+    tmp_path.write_bytes(compressed)
+    tmp_path.replace(local_path)
+
+    base["downloaded_now"] = True
+    base["reused_local_cache"] = False
+    base["compressed_bytes"] = len(compressed)
+    base["content_length_header"] = response.get("ContentLength")
+    base["etag"] = str(response.get("ETag", "")).strip('"')
+    return compressed
+
+
 def main() -> int:
     base = {
         "phase": "04H-1",
@@ -179,29 +219,22 @@ def main() -> int:
         base["error"] = "El protocolo no autoriza requester-pays."
         _write_artifact(base)
         return 2
-    if os.environ.get(AUTH_ENV) != "YES":
-        base["error"] = f"Falta {AUTH_ENV}=YES; se rehúsa cualquier llamada con coste."
-        _write_artifact(base)
-        return 2
     if HYPERLIQUID_PROBE_DIAS_MAX_04H1 != 1:
         base["error"] = "El probe dejó de estar limitado exactamente a un día."
         _write_artifact(base)
         return 2
+    if PROBE_HORAS_ESPERADAS_04H1 != 24:
+        base["error"] = "El probe de un día debe exigir exactamente 24 horas."
+        _write_artifact(base)
+        return 2
 
     key = f"{HYPERLIQUID_ASSET_CTXS_PREFIX_04H1}/{HYPERLIQUID_PROBE_DATE_04H1}.csv.lz4"
+    local_path = DATA_DIR / f"{HYPERLIQUID_PROBE_DATE_04H1}.csv.lz4"
     base["key"] = key
+    base["local_path"] = str(local_path.relative_to(ROOT))
 
     try:
-        s3 = boto3.client("s3")
-        response = s3.get_object(
-            Bucket=HYPERLIQUID_ASSET_CTXS_BUCKET_04H1,
-            Key=key,
-            RequestPayer="requester",
-        )
-        compressed = response["Body"].read()
-        base["compressed_bytes"] = len(compressed)
-        base["content_length_header"] = response.get("ContentLength")
-        base["etag"] = str(response.get("ETag", "")).strip('"')
+        compressed = _load_or_download(key, local_path, base)
         csv_bytes = lz4.frame.decompress(compressed)
         base["decompressed_bytes"] = len(csv_bytes)
         base["audit"] = _audit_csv(csv_bytes, HYPERLIQUID_PROBE_DATE_04H1)
