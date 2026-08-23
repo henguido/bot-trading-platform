@@ -15,27 +15,31 @@ DIRECCION_04H1 = "LONG_BINANCE_SHORT_HYPERLIQUID"
 PESO_POR_ACTIVO_04H1 = Decimal("0.3333333333333333333333333333")
 LEVERAGE_POR_PATA_04H1 = Decimal("2")
 
-# Drag all-in anual predeclarado sobre notional de referencia.
 COSTE_PRIMARIO_BPS_ANUAL_04H1 = Decimal("60")
 COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 
-# Fuente histórica de precios Hyperliquid congelada antes del PnL.
-HYPERLIQUID_PRICE_SOURCE_04H1 = "0XARCHIVE_PRICE_HISTORY"
+# Fuente histórica Hyperliquid congelada antes del PnL.
+# priceHistory(1h) es la fuente primaria. La auditoría oficial de calidad indicó
+# 100% de cobertura en open_interest, cuyo registro incluye mark_price y
+# oracle_price explícitos. Open interest puede completar únicamente timestamps
+# horarios EXACTOS ausentes de priceHistory; no nearest-neighbor ni interpolación.
+HYPERLIQUID_PRICE_SOURCE_04H1 = "0XARCHIVE_PRICE_HISTORY_WITH_EXACT_OI_FALLBACK"
 OXARCHIVE_BASE_URL_04H1 = "https://api.0xarchive.io"
 OXARCHIVE_PRICE_INTERVAL_04H1 = "1h"
+OXARCHIVE_OI_INTERVAL_04H1 = "1h"
 OXARCHIVE_MARK_HISTORICO_OBLIGATORIO_04H1 = True
 OXARCHIVE_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
+OXARCHIVE_OI_FALLBACK_EXACTO_PERMITIDO_04H1 = True
+OXARCHIVE_OI_NEAREST_PERMITIDO_04H1 = False
 API_KEY_DATOS_0XARCHIVE_PERMITIDA_04H1 = True
 USAR_CANDLES_COMO_ORACLE_PERMITIDO_04H1 = False
 USAR_CANDLES_COMO_MARK_PERMITIDO_04H1 = False
 
-# Probe previo a PnL: siete días completos al inicio de 2024.
 PROBE_DESDE_04H1 = "2024-01-01T00:00:00Z"
 PROBE_HASTA_04H1 = "2024-01-08T00:00:00Z"
 PROBE_HORAS_ESPERADAS_04H1 = 168
 PROBE_COBERTURA_MIN_04H1 = Decimal("0.99")
 
-# Gate completo 2024-2025. Si no pasa, el runner se detiene ANTES de PnL.
 DESDE_04H1 = "2024-01-01T00:00:00Z"
 HASTA_EXCLUSIVO_04H1 = "2026-01-01T00:00:00Z"
 HORAS_ESPERADAS_04H1 = 17544
@@ -47,26 +51,19 @@ BINANCE_DATA_URL_04H1 = "https://data.binance.vision/data"
 BINANCE_SYMBOLS_04H1 = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT"}
 BINANCE_INTERVALO_PRECIO_04H1 = "8h"
 
-# Definición PnL congelada.
-# Por activo y sleeve anual se mantiene 1 unidad base long Binance / short HL.
-# El notional de referencia es el promedio de ambos precios al primer punto
-# alineado del año; con 2x por pata, el capital inicial de referencia = N.
 BASE_UNITS_04H1 = Decimal("1")
 HAC_LAG_DIAS_04H1 = 7
 MIN_ACTIVOS_POSITIVOS_POR_ANIO_04H1 = 2
 
-# Gates económicos mínimos.
 SHARPE_ECONOMICO_MIN_04H1 = Decimal("1.0")
 MAX_DRAWDOWN_ECONOMICO_04H1 = Decimal("0.10")
 TSTAT_HAC_ABS_MIN_04H1 = Decimal("1.96")
 
-# Gates para considerar la estrategia candidata a ingeniería productiva.
 RETORNO_MEDIO_ANUAL_CAPITAL_MIN_04H1 = Decimal("0.05")
 PEOR_ANIO_CAPITAL_MIN_04H1 = Decimal("0.02")
 SHARPE_PRODUCCION_MIN_04H1 = Decimal("2.0")
 MAX_DRAWDOWN_PRODUCCION_04H1 = Decimal("0.075")
 
-# Candados metodológicos.
 SELECCION_POST_RESULTADO_PERMITIDA_04H1 = False
 INVERTIR_DIRECCION_POST_RESULTADO_PERMITIDO_04H1 = False
 CAMBIAR_COSTES_POST_RESULTADO_PERMITIDO_04H1 = False
@@ -78,8 +75,6 @@ LIVE_PERMITIDO_04H1 = False
 RENDER_PERMITIDO_04H1 = False
 DESARROLLO_2026_ABIERTO_04H1 = False
 
-# El probe ya habilita construir el runner. El PnL solo puede ejecutarse DESPUÉS
-# de que el propio runner demuestre el gate completo 2024-2025 en la misma corrida.
 REQUIERE_GATE_PRECIOS_ANTES_DE_PNL_04H1 = True
 CALCULAR_PNL_SI_GATE_COMPLETO_PASA_04H1 = True
 CALCULAR_PNL_SIN_GATE_PERMITIDO_04H1 = False
