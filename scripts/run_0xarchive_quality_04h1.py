@@ -15,13 +15,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.economia.fuente_0xarchive_04h1 import (
+    _fetch_range_endpoint_04h1,
     fetch_open_interest_context_04h1,
-    fetch_price_history_raw_04h1,
 )
 from backend.economia.protocolo_crossvenue_carry_04h1 import (
     ACTIVOS_04H1,
     DESDE_04H1,
     HASTA_EXCLUSIVO_04H1,
+    OXARCHIVE_BASE_URL_04H1,
+    OXARCHIVE_PRICE_INTERVAL_04H1,
 )
 
 HOUR_MS = 3_600_000
@@ -82,7 +84,10 @@ def main() -> None:
             raise RuntimeError(f"QUALITY_HTTP_{response.status_code}:{detail}")
         quality_payload = response.json()
 
-        primary = fetch_price_history_raw_04h1(asset, lo, hi, key)
+        price_url = f"{OXARCHIVE_BASE_URL_04H1}/v1/hyperliquid/prices/{asset}"
+        primary = _fetch_range_endpoint_04h1(
+            price_url, lo, hi, OXARCHIVE_PRICE_INTERVAL_04H1, key, requests.get
+        )
         oi = fetch_open_interest_context_04h1(asset, lo, hi, key)
         primary_ts = sorted({p.timestamp_ms for p in primary})
         oi_ts = sorted({p.timestamp_ms for p in oi})
