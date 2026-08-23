@@ -21,6 +21,15 @@ LEVERAGE_POR_PATA_04H1 = Decimal("2")
 COSTE_PRIMARIO_BPS_ANUAL_04H1 = Decimal("60")
 COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 
+# Fuentes históricas obligatorias para reconstrucción económica exacta.
+# Hyperliquid fundingHistory no incluye el histórico completo de oracle/mark;
+# 04H-1 exige asset_ctxs oficial y prohíbe sustituirlo por candles aproximados.
+HYPERLIQUID_ASSET_CTXS_ROOT_04H1 = "s3://hyperliquid-archive/asset_ctxs"
+HYPERLIQUID_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
+HYPERLIQUID_MARK_HISTORICO_OBLIGATORIO_04H1 = True
+USAR_CANDLES_COMO_ORACLE_PERMITIDO_04H1 = False
+USAR_CANDLES_COMO_MARK_PERMITIDO_04H1 = False
+
 # Gates económicos mínimos.
 SHARPE_ECONOMICO_MIN_04H1 = Decimal("1.0")
 MAX_DRAWDOWN_ECONOMICO_04H1 = Decimal("0.10")
@@ -44,6 +53,8 @@ LIVE_PERMITIDO_04H1 = False
 RENDER_PERMITIDO_04H1 = False
 DESARROLLO_2026_ABIERTO_04H1 = False
 
-# 04H-1 sí autoriza cálculo histórico económico 2024-2025 una vez que el
-# protocolo y sus pruebas estén versionados. 2026 sigue físicamente excluido.
-CALCULAR_PNL_2024_2025_PERMITIDO_04H1 = True
+# El PnL histórico solo queda habilitable DESPUÉS de demostrar que oracle/mark
+# oficiales 2024-2025 pueden reconstruirse sin imputación. Hasta entonces,
+# 04H-1 permanece PRE-PNL.
+REQUIERE_GATE_ASSET_CTXS_ANTES_DE_PNL_04H1 = True
+CALCULAR_PNL_2024_2025_PERMITIDO_04H1 = False
