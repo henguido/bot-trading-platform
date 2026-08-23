@@ -219,7 +219,16 @@ def fetch_price_history_04h1(
         raise ValueError("OXARCHIVE_RANGE_INVALID")
     asset = asset.upper()
     url = f"{OXARCHIVE_BASE_URL_04H1}/v1/hyperliquid/prices/{asset}"
-    return _fetch_range_endpoint_04h1(url, start_ms, end_ms, OXARCHIVE_PRICE_INTERVAL_04H1, api_key, request_get)
+    primary = _fetch_range_endpoint_04h1(
+        url, start_ms, end_ms, OXARCHIVE_PRICE_INTERVAL_04H1, api_key, request_get
+    )
+    expected_slots = len(range(start_ms, end_ms, _HOUR_MS))
+    if len(primary) >= expected_slots:
+        return primary
+    oi_context = fetch_open_interest_context_04h1(
+        asset, start_ms, end_ms, api_key, request_get=request_get
+    )
+    return merge_exact_oi_fallback_04h1(primary, oi_context, start_ms, end_ms)
 
 
 def fetch_open_interest_context_04h1(
