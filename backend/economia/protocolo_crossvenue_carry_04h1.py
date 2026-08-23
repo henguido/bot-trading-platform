@@ -25,19 +25,24 @@ COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 #
 # La fuente oficial pasa a ser el archivo requester-pays de Hyperliquid:
 # s3://hyperliquid-archive/asset_ctxs/{YYYYMMDD}.csv.lz4
-# El usuario autorizó explícitamente una prueba acotada de un solo día antes de
-# descargar 2024-2025. El probe debe usar credenciales AWS de lectura fuera del
-# repositorio y RequestPayer=requester.
+# El probe de un día pasó 24/24 horas para BTC/ETH/SOL con mark_px/oracle_px.
+# El usuario autorizó después la descarga LOCAL completa y estrictamente acotada
+# a 2024-01-01..2025-12-31. 2026 permanece cerrado.
 HYPERLIQUID_PRICE_SOURCE_04H1 = "HYPERLIQUID_OFFICIAL_ASSET_CTXS_REQUESTER_PAYS"
 HYPERLIQUID_ASSET_CTXS_BUCKET_04H1 = "hyperliquid-archive"
 HYPERLIQUID_ASSET_CTXS_PREFIX_04H1 = "asset_ctxs"
 HYPERLIQUID_REQUESTER_PAYS_04H1 = True
 HYPERLIQUID_PROBE_DATE_04H1 = "20240101"
 HYPERLIQUID_PROBE_DIAS_MAX_04H1 = 1
+HYPERLIQUID_DOWNLOAD_DESDE_04H1 = "20240101"
+HYPERLIQUID_DOWNLOAD_HASTA_04H1 = "20251231"
+HYPERLIQUID_DOWNLOAD_DIAS_ESPERADOS_04H1 = 731
+HYPERLIQUID_DOWNLOAD_2026_PERMITIDO_04H1 = False
 HYPERLIQUID_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
 HYPERLIQUID_MARK_HISTORICO_OBLIGATORIO_04H1 = True
 AWS_CREDENCIALES_EN_REPO_PERMITIDAS_04H1 = False
 AWS_REQUESTER_PAYS_AUTORIZADO_04H1 = True
+AWS_REQUESTER_PAYS_FULL_2024_2025_AUTORIZADO_04H1 = True
 
 # Constantes de la vía descartada se conservan únicamente para trazabilidad de
 # auditoría y para que los scripts históricos de calidad sigan siendo legibles.
