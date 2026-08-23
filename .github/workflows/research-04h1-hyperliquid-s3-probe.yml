@@ -1,0 +1,58 @@
+name: research-04h1-hyperliquid-s3-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ''
+  BINANCE_API_KEY: ''
+  BINANCE_API_SECRET: ''
+  SECRET_KEY: ci-research-only-synthetic-key-04h1-s3-probe
+  ALLOW_HYPERLIQUID_REQUESTER_PAYS_PROBE: 'YES'
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+jobs:
+  official-asset-ctxs-one-day-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install probe-only dependencies
+        run: pip install boto3 lz4
+
+      - name: Assert safety locks and AWS requester identity
+        run: |
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          test "$ALLOW_HYPERLIQUID_REQUESTER_PAYS_PROBE" = "YES"
+          aws sts get-caller-identity >/dev/null
+
+      - name: Download and audit exactly one official asset_ctxs day
+        run: python scripts/probe_hyperliquid_asset_ctxs_04h1.py
+
+      - name: Upload requester-pays probe artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperliquid-asset-ctxs-probe-04h1
+          path: artifacts/hyperliquid-asset-ctxs-probe-04h1.json
+          if-no-files-found: warn
+          retention-days: 14
