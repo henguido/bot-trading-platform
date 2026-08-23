@@ -1,4 +1,5 @@
 from backend.economia.fuente_0xarchive_04h1 import (
+    WINDOW_DAYS_0XARCHIVE_04H1,
     coverage_04h1,
     fetch_price_history_04h1,
     parse_price_point_04h1,
@@ -6,9 +7,11 @@ from backend.economia.fuente_0xarchive_04h1 import (
 
 
 class FakeResponse:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, text="", headers=None):
         self._payload = payload
         self.status_code = status_code
+        self.text = text
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -65,6 +68,58 @@ def test_fetch_price_history_pagina_y_no_expone_key():
     assert calls[0][0].endswith("/v1/hyperliquid/prices/BTC")
     assert calls[0][1]["headers"]["X-API-Key"] == "secret-read-only-key"
     assert "secret-read-only-key" not in str(calls[0][1]["params"])
+
+
+def test_fetch_price_history_divide_rango_en_ventanas_sin_solape():
+    calls = []
+    day = 86_400_000
+    start = 1704067200000
+    end = start + 65 * day
+
+    def fake_get(url, **kwargs):
+        params = kwargs["params"]
+        calls.append((params["start"], params["end"]))
+        # Una observación exactamente al inicio de cada ventana.
+        return FakeResponse({
+            "data": [{
+                "timestamp": params["start"],
+                "mark_price": "100",
+                "oracle_price": "100",
+            }],
+            "meta": {},
+        })
+
+    points = fetch_price_history_04h1("BTC", start, end, "k", request_get=fake_get)
+    assert WINDOW_DAYS_0XARCHIVE_04H1 == 30
+    assert calls == [
+        (start, start + 30 * day),
+        (start + 30 * day, start + 60 * day),
+        (start + 60 * day, end),
+    ]
+    assert len(points) == 3
+    assert len({p.timestamp_ms for p in points}) == 3
+
+
+def test_fetch_price_history_subdivide_400_hasta_funcionar():
+    start = 1704067200000
+    end = start + 4 * 86_400_000
+    calls = []
+
+    def fake_get(url, **kwargs):
+        lo, hi = kwargs["params"]["start"], kwargs["params"]["end"]
+        calls.append((lo, hi))
+        if hi - lo > 2 * 86_400_000:
+            return FakeResponse({"error": "range too large"}, status_code=400)
+        return FakeResponse({
+            "data": [{"timestamp": lo, "mark_price": "10", "oracle_price": "10"}],
+            "meta": {},
+        })
+
+    points = fetch_price_history_04h1("BTC", start, end, "k", request_get=fake_get)
+    assert len(points) == 2
+    assert calls[0] == (start, end)
+    assert calls[1][0] == start
+    assert calls[2][1] == end
 
 
 def test_fetch_price_history_rechaza_duplicados():
