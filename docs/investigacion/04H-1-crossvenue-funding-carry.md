@@ -2,9 +2,13 @@
 
 ## Estado
 
-**PREDECLARADO / SIN RESULTADO ECONÓMICO AL VERSIONAR ESTE DOCUMENTO.**
+**PREDECLARADO / PRE-PNL.**
 
-04H-1 es la primera falsación económica de la línea 04H. Parte exclusivamente de `DATASET_CROSSVENUE_FUNDING_APTO_04H0`. No modifica Scanner, RiskEngine, PAPER, LIVE, Render ni credenciales. 2026 permanece cerrado.
+04H-1 parte exclusivamente de `DATASET_CROSSVENUE_FUNDING_APTO_04H0`. No modifica Scanner, RiskEngine, PAPER, LIVE, Render ni credenciales. 2026 permanece cerrado.
+
+Antes de habilitar PnL existe un gate adicional de reconstrucción económica: Hyperliquid publica `oraclePx` y `markPx` históricos en `s3://hyperliquid-archive/asset_ctxs`, un bucket requester-pays. La API gratuita `fundingHistory` no sustituye ese histórico de precios. 04H-1 **prohíbe usar candles como proxy de oracle/mark** para rescatar la prueba.
+
+Mientras no se valide esa fuente exacta para 2024-2025, `CALCULAR_PNL_2024_2025_PERMITIDO_04H1 = False`.
 
 ## Hipótesis única
 
@@ -35,12 +39,28 @@ Por cada activo:
 
 - long Binance USD-M perpetual;
 - short Hyperliquid perpetual;
-- igual notional/base exposure en ambas patas;
+- igual exposición base en ambas patas;
 - leverage de referencia fijo: **2x por pata**;
 - sin market timing;
 - sin selección por signo observado de funding;
 - sin ML;
 - sin GPT.
+
+## Gate previo de reconstrucción económica
+
+Para habilitar el runner de PnL deben existir observaciones oficiales suficientes para BTC/ETH/SOL durante 2024-2025:
+
+1. funding realizado Hyperliquid mediante `fundingHistory`;
+2. `oraclePx` histórico Hyperliquid desde `asset_ctxs`;
+3. `markPx` histórico Hyperliquid desde `asset_ctxs`;
+4. funding realizado Binance desde Binance Vision;
+5. mark/perpetual prices Binance desde Binance Vision;
+6. timestamps alineables sin imputación;
+7. cero duplicados conflictivos y valores no finitos.
+
+No se autoriza sustituir `oraclePx` o `markPx` por OHLC candles. Si el gate no puede demostrarse, el resultado permitido es únicamente `DATOS_ECONOMICOS_INSUFICIENTES_04H1` y no se calcula PnL.
+
+La descarga requester-pays de Hyperliquid no se ejecuta automáticamente ni sin autorización explícita del usuario.
 
 ## Funding
 
@@ -49,7 +69,7 @@ No se inventa una cadencia común.
 - Hyperliquid se procesa en sus timestamps reales de funding horario;
 - Binance se procesa en sus settlements reales publicados;
 - no se divide funding Binance artificialmente para crear observaciones horarias;
-- para cada intervalo económico se acumulan únicamente cash-flows de funding realmente observados dentro del intervalo correspondiente;
+- cada cash-flow usa el precio histórico oficial requerido por el venue/protocolo;
 - timestamps duplicados, tasas no finitas o desalineaciones no explicables fallan cerrado.
 
 Convención de signos del portafolio:
@@ -111,12 +131,6 @@ Por activo, año y portfolio BTC/ETH/SOL:
 - turnover/rebalances si los hubiera por mecánica de igualación;
 - t-stat HAC/Newey-West del spread/carry agregado bajo una definición fijada en código antes del resultado.
 
-## Gate de datos
-
-04H-1 falla por datos si cualquiera de BTC/ETH/SOL no conserva la suficiencia demostrada por 04H-0 o si al construir la serie económica aparecen duplicados, valores no finitos o gaps que requieran imputación.
-
-No hay interpolación, forward-fill, backward-fill ni fabricación de funding o precios.
-
 ## Gate económico
 
 La hipótesis es económicamente apta únicamente si simultáneamente:
@@ -146,18 +160,7 @@ Estos umbrales conservan la vara ya utilizada en 04C-2; no se relajan para 04H-1
 
 ## Limitación de liquidación
 
-Los candles 8h disponibles no equivalen al histórico completo de mark price usado por ambos motores de liquidación. 04H-1 puede producir proxies conservadores de excursión adversa y utilización de margen, pero **no puede afirmar supervivencia exacta de liquidación**.
-
-Si 04H-1 pasa el gate candidato, una 04H-2 separada debe reconstruir:
-
-- maintenance margin;
-- top-ups;
-- liquidation buffer;
-- partial fills / una sola pata;
-- ejecución simultánea;
-- outages;
-- slippage/depth a tamaño objetivo;
-- riesgo de exchange/custodia.
+Incluso con oracle/mark históricos, 04H-1 es una prueba económica, no una réplica exacta de los motores de margen. Si supera el gate candidato, 04H-2 debe reconstruir maintenance margin, top-ups, liquidation buffer, partial fills, ejecución simultánea, outages, profundidad/slippage a tamaño objetivo y riesgo de exchange/custodia.
 
 ## Candados
 
@@ -167,6 +170,7 @@ Si 04H-1 pasa el gate candidato, una 04H-2 separada debe reconstruir:
 - no cambiar 60/120 bps;
 - no optimizar leverage después del resultado;
 - no seleccionar periodos por funding observado;
+- no usar candles como oracle/mark histórico;
 - no imputar;
 - no añadir ML;
 - no GPT;
@@ -178,7 +182,10 @@ Si 04H-1 pasa el gate candidato, una 04H-2 separada debe reconstruir:
 
 ## Camino posterior
 
-- si falla 04H-1: cerrar la hipótesis sin rescate post-hoc;
+- validar primero `asset_ctxs` 2024-2025;
+- si falla el gate de datos: detener sin PnL;
+- si pasa: habilitar el runner económico sin cambiar hipótesis ni gates;
+- si falla económicamente: cerrar 04H-1 sin rescate post-hoc;
 - si es positiva pero no supera gate productivo: documentar prima insuficiente;
 - si supera gate candidato: diseñar 04H-2 de viabilidad operativa;
 - abrir 2026 solo después de congelar completamente 04H-2;
