@@ -16,19 +16,26 @@ PESO_POR_ACTIVO_04H1 = Decimal("0.3333333333333333333333333333")
 LEVERAGE_POR_PATA_04H1 = Decimal("2")
 
 # Drag all-in anual predeclarado sobre notional de referencia.
-# Caso primario y stress. No se usarán VIP, BNB discount ni maker fills
-# retrospectivos para reducir estos supuestos después de ver resultados.
 COSTE_PRIMARIO_BPS_ANUAL_04H1 = Decimal("60")
 COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 
-# Fuentes históricas obligatorias para reconstrucción económica exacta.
-# Hyperliquid fundingHistory no incluye el histórico completo de oracle/mark;
-# 04H-1 exige asset_ctxs oficial y prohíbe sustituirlo por candles aproximados.
-HYPERLIQUID_ASSET_CTXS_ROOT_04H1 = "s3://hyperliquid-archive/asset_ctxs"
-HYPERLIQUID_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
-HYPERLIQUID_MARK_HISTORICO_OBLIGATORIO_04H1 = True
+# Fuente histórica de precios Hyperliquid congelada antes del PnL.
+# 0xArchive expone priceHistory con mark/oracle/mid a 1h desde 2023.
+# La clave es exclusivamente de lectura de datos; no habilita trading.
+HYPERLIQUID_PRICE_SOURCE_04H1 = "0XARCHIVE_PRICE_HISTORY"
+OXARCHIVE_BASE_URL_04H1 = "https://api.0xarchive.io"
+OXARCHIVE_PRICE_INTERVAL_04H1 = "1h"
+OXARCHIVE_MARK_HISTORICO_OBLIGATORIO_04H1 = True
+OXARCHIVE_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
+API_KEY_DATOS_0XARCHIVE_PERMITIDA_04H1 = True
 USAR_CANDLES_COMO_ORACLE_PERMITIDO_04H1 = False
 USAR_CANDLES_COMO_MARK_PERMITIDO_04H1 = False
+
+# Probe previo a PnL: siete días completos al inicio de 2024.
+PROBE_DESDE_04H1 = "2024-01-01T00:00:00Z"
+PROBE_HASTA_04H1 = "2024-01-08T00:00:00Z"
+PROBE_HORAS_ESPERADAS_04H1 = 168
+PROBE_COBERTURA_MIN_04H1 = Decimal("0.99")
 
 # Gates económicos mínimos.
 SHARPE_ECONOMICO_MIN_04H1 = Decimal("1.0")
@@ -47,14 +54,13 @@ INVERTIR_DIRECCION_POST_RESULTADO_PERMITIDO_04H1 = False
 CAMBIAR_COSTES_POST_RESULTADO_PERMITIDO_04H1 = False
 OPTIMIZAR_LEVERAGE_POST_RESULTADO_PERMITIDO_04H1 = False
 GPT_PERMITIDO_04H1 = False
-CREDENCIALES_PERMITIDAS_04H1 = False
+CREDENCIALES_TRADING_PERMITIDAS_04H1 = False
 PAPER_OPERATIVO_PERMITIDO_04H1 = False
 LIVE_PERMITIDO_04H1 = False
 RENDER_PERMITIDO_04H1 = False
 DESARROLLO_2026_ABIERTO_04H1 = False
 
-# El PnL histórico solo queda habilitable DESPUÉS de demostrar que oracle/mark
-# oficiales 2024-2025 pueden reconstruirse sin imputación. Hasta entonces,
-# 04H-1 permanece PRE-PNL.
-REQUIERE_GATE_ASSET_CTXS_ANTES_DE_PNL_04H1 = True
+# El PnL histórico solo queda habilitable DESPUÉS de que el probe y el gate
+# completo 2024-2025 demuestren mark/oracle sin imputación.
+REQUIERE_GATE_PRECIOS_ANTES_DE_PNL_04H1 = True
 CALCULAR_PNL_2024_2025_PERMITIDO_04H1 = False
