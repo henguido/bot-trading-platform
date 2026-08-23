@@ -17,6 +17,12 @@
 *.db-journal
 
 # ─────────────────────────────────────────────────────────────
+# Datos históricos locales de investigación — NUNCA versionar
+# Se descargan una sola vez y se reutilizan para evitar nuevas transferencias.
+# ─────────────────────────────────────────────────────────────
+data/research/04h1/
+
+# ─────────────────────────────────────────────────────────────
 # Backups y comprimidos
 # ─────────────────────────────────────────────────────────────
 *.rar
