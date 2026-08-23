@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 # BOT 2.0 — 04H-1
-# Protocolo económico congelado ANTES de observar PnL cross-venue.
+# Protocolo económico congelado ANTES de observar PnL cross-venue 2024-2025.
 
 ACTIVOS_04H1 = ("BTC", "ETH", "SOL")
 ANIOS_04H1 = (2024, 2025)
@@ -20,8 +20,6 @@ COSTE_PRIMARIO_BPS_ANUAL_04H1 = Decimal("60")
 COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 
 # Fuente histórica de precios Hyperliquid congelada antes del PnL.
-# 0xArchive expone priceHistory con mark/oracle/mid a 1h desde 2023.
-# La clave es exclusivamente de lectura de datos; no habilita trading.
 HYPERLIQUID_PRICE_SOURCE_04H1 = "0XARCHIVE_PRICE_HISTORY"
 OXARCHIVE_BASE_URL_04H1 = "https://api.0xarchive.io"
 OXARCHIVE_PRICE_INTERVAL_04H1 = "1h"
@@ -36,6 +34,26 @@ PROBE_DESDE_04H1 = "2024-01-01T00:00:00Z"
 PROBE_HASTA_04H1 = "2024-01-08T00:00:00Z"
 PROBE_HORAS_ESPERADAS_04H1 = 168
 PROBE_COBERTURA_MIN_04H1 = Decimal("0.99")
+
+# Gate completo 2024-2025. Si no pasa, el runner se detiene ANTES de PnL.
+DESDE_04H1 = "2024-01-01T00:00:00Z"
+HASTA_EXCLUSIVO_04H1 = "2026-01-01T00:00:00Z"
+HORAS_ESPERADAS_04H1 = 17544
+BARRAS_8H_ESPERADAS_04H1 = 2193
+COBERTURA_PRECIOS_MIN_04H1 = Decimal("0.99")
+COBERTURA_FUNDING_HL_MIN_04H1 = Decimal("0.99")
+COBERTURA_ALINEADA_8H_MIN_04H1 = Decimal("0.99")
+BINANCE_DATA_URL_04H1 = "https://data.binance.vision/data"
+BINANCE_SYMBOLS_04H1 = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT"}
+BINANCE_INTERVALO_PRECIO_04H1 = "8h"
+
+# Definición PnL congelada.
+# Por activo y sleeve anual se mantiene 1 unidad base long Binance / short HL.
+# El notional de referencia es el promedio de ambos precios al primer punto
+# alineado del año; con 2x por pata, el capital inicial de referencia = N.
+BASE_UNITS_04H1 = Decimal("1")
+HAC_LAG_DIAS_04H1 = 7
+MIN_ACTIVOS_POSITIVOS_POR_ANIO_04H1 = 2
 
 # Gates económicos mínimos.
 SHARPE_ECONOMICO_MIN_04H1 = Decimal("1.0")
@@ -60,7 +78,8 @@ LIVE_PERMITIDO_04H1 = False
 RENDER_PERMITIDO_04H1 = False
 DESARROLLO_2026_ABIERTO_04H1 = False
 
-# El PnL histórico solo queda habilitable DESPUÉS de que el probe y el gate
-# completo 2024-2025 demuestren mark/oracle sin imputación.
+# El probe ya habilita construir el runner. El PnL solo puede ejecutarse DESPUÉS
+# de que el propio runner demuestre el gate completo 2024-2025 en la misma corrida.
 REQUIERE_GATE_PRECIOS_ANTES_DE_PNL_04H1 = True
-CALCULAR_PNL_2024_2025_PERMITIDO_04H1 = False
+CALCULAR_PNL_SI_GATE_COMPLETO_PASA_04H1 = True
+CALCULAR_PNL_SIN_GATE_PERMITIDO_04H1 = False
