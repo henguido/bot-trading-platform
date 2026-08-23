@@ -19,25 +19,42 @@ COSTE_PRIMARIO_BPS_ANUAL_04H1 = Decimal("60")
 COSTE_STRESS_BPS_ANUAL_04H1 = Decimal("120")
 
 # Fuente histórica Hyperliquid congelada antes del PnL.
-# priceHistory(1h) es la fuente primaria. La auditoría oficial de calidad indicó
-# 100% de cobertura en open_interest, cuyo registro incluye mark_price y
-# oracle_price explícitos. Open interest puede completar únicamente timestamps
-# horarios EXACTOS ausentes de priceHistory; no nearest-neighbor ni interpolación.
-HYPERLIQUID_PRICE_SOURCE_04H1 = "0XARCHIVE_PRICE_HISTORY_WITH_EXACT_OI_FALLBACK"
+# La vía 0xArchive quedó descartada para el gate oficial porque priceHistory no
+# alcanzó 99% de cobertura y el fallback exacto de open_interest no aportó los
+# timestamps faltantes. No se permite interpolar ni usar candles como proxy.
+#
+# La fuente oficial pasa a ser el archivo requester-pays de Hyperliquid:
+# s3://hyperliquid-archive/asset_ctxs/{YYYYMMDD}.csv.lz4
+# El usuario autorizó explícitamente una prueba acotada de un solo día antes de
+# descargar 2024-2025. El probe debe usar credenciales AWS de lectura fuera del
+# repositorio y RequestPayer=requester.
+HYPERLIQUID_PRICE_SOURCE_04H1 = "HYPERLIQUID_OFFICIAL_ASSET_CTXS_REQUESTER_PAYS"
+HYPERLIQUID_ASSET_CTXS_BUCKET_04H1 = "hyperliquid-archive"
+HYPERLIQUID_ASSET_CTXS_PREFIX_04H1 = "asset_ctxs"
+HYPERLIQUID_REQUESTER_PAYS_04H1 = True
+HYPERLIQUID_PROBE_DATE_04H1 = "20240101"
+HYPERLIQUID_PROBE_DIAS_MAX_04H1 = 1
+HYPERLIQUID_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
+HYPERLIQUID_MARK_HISTORICO_OBLIGATORIO_04H1 = True
+AWS_CREDENCIALES_EN_REPO_PERMITIDAS_04H1 = False
+AWS_REQUESTER_PAYS_AUTORIZADO_04H1 = True
+
+# Constantes de la vía descartada se conservan únicamente para trazabilidad de
+# auditoría y para que los scripts históricos de calidad sigan siendo legibles.
 OXARCHIVE_BASE_URL_04H1 = "https://api.0xarchive.io"
 OXARCHIVE_PRICE_INTERVAL_04H1 = "1h"
 OXARCHIVE_OI_INTERVAL_04H1 = "1h"
 OXARCHIVE_MARK_HISTORICO_OBLIGATORIO_04H1 = True
 OXARCHIVE_ORACLE_HISTORICO_OBLIGATORIO_04H1 = True
-OXARCHIVE_OI_FALLBACK_EXACTO_PERMITIDO_04H1 = True
+OXARCHIVE_OI_FALLBACK_EXACTO_PERMITIDO_04H1 = False
 OXARCHIVE_OI_NEAREST_PERMITIDO_04H1 = False
-API_KEY_DATOS_0XARCHIVE_PERMITIDA_04H1 = True
+API_KEY_DATOS_0XARCHIVE_PERMITIDA_04H1 = False
 USAR_CANDLES_COMO_ORACLE_PERMITIDO_04H1 = False
 USAR_CANDLES_COMO_MARK_PERMITIDO_04H1 = False
 
 PROBE_DESDE_04H1 = "2024-01-01T00:00:00Z"
-PROBE_HASTA_04H1 = "2024-01-08T00:00:00Z"
-PROBE_HORAS_ESPERADAS_04H1 = 168
+PROBE_HASTA_04H1 = "2024-01-02T00:00:00Z"
+PROBE_HORAS_ESPERADAS_04H1 = 24
 PROBE_COBERTURA_MIN_04H1 = Decimal("0.99")
 
 DESDE_04H1 = "2024-01-01T00:00:00Z"
