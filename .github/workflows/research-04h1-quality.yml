@@ -1,0 +1,50 @@
+name: research-04h1-quality
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/run_0xarchive_quality_04h1.py'
+      - '.github/workflows/research-04h1-quality.yml'
+
+permissions:
+  contents: read
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ''
+  BINANCE_API_KEY: ''
+  BINANCE_API_SECRET: ''
+  SECRET_KEY: ci-research-only-synthetic-key-04h1-quality
+  OXARCHIVE_API_KEY: ${{ secrets.OXARCHIVE_API_KEY }}
+
+jobs:
+  quality-gaps-04h1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install minimal dependency
+        run: pip install requests
+      - name: Assert safety locks
+        run: |
+          test -n "$OXARCHIVE_API_KEY"
+          test -z "$BINANCE_API_KEY"
+          test -z "$BINANCE_API_SECRET"
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+      - name: Query official data-quality gaps 2024-2025
+        run: python scripts/run_0xarchive_quality_04h1.py
+      - name: Upload quality artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxarchive-quality-04h1
+          path: artifacts/oxarchive-quality-04h1.json
+          if-no-files-found: warn
+          retention-days: 14
