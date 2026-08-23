@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+import sys
+from datetime import datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from backend.economia.fuente_0xarchive_04h1 import coverage_04h1, fetch_price_history_04h1
 from backend.economia.protocolo_crossvenue_carry_04h1 import (
