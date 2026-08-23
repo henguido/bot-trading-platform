@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.economia.carry_crossvenue_04h1 import run_remote_04h1
+from backend.economia.orquestador_crossvenue_04h1 import run_remote_exact_04h1
 
 
 def main() -> None:
     api_key = os.environ.get("OXARCHIVE_API_KEY", "").strip()
     if not api_key:
         raise SystemExit("OXARCHIVE_API_KEY_MISSING")
-    result = run_remote_04h1(api_key)
+    result = run_remote_exact_04h1(api_key)
     payload = result.to_dict()
     out = Path("artifacts/crossvenue-carry-04h1.json")
     out.parent.mkdir(parents=True, exist_ok=True)
