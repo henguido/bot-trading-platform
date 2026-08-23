@@ -70,7 +70,7 @@ def test_fetch_price_history_pagina_y_no_expone_key():
     assert "secret-read-only-key" not in str(calls[0][1]["params"])
 
 
-def test_fetch_price_history_divide_rango_en_ventanas_sin_solape():
+def test_fetch_price_history_divide_rango_en_ventanas_y_luego_oi_exacto():
     calls = []
     day = 86_400_000
     start = 1704067200000
@@ -78,8 +78,8 @@ def test_fetch_price_history_divide_rango_en_ventanas_sin_solape():
 
     def fake_get(url, **kwargs):
         params = kwargs["params"]
-        calls.append((params["start"], params["end"]))
-        # Una observación exactamente al inicio de cada ventana.
+        calls.append((url, params["start"], params["end"]))
+        # Una observación exactamente al inicio de cada ventana: fuerza fallback OI.
         return FakeResponse({
             "data": [{
                 "timestamp": params["start"],
@@ -91,11 +91,15 @@ def test_fetch_price_history_divide_rango_en_ventanas_sin_solape():
 
     points = fetch_price_history_04h1("BTC", start, end, "k", request_get=fake_get)
     assert WINDOW_DAYS_0XARCHIVE_04H1 == 30
-    assert calls == [
+    expected_windows = [
         (start, start + 30 * day),
         (start + 30 * day, start + 60 * day),
         (start + 60 * day, end),
     ]
+    assert [(lo, hi) for _, lo, hi in calls[:3]] == expected_windows
+    assert all("/v1/hyperliquid/prices/BTC" in url for url, _, _ in calls[:3])
+    assert [(lo, hi) for _, lo, hi in calls[3:]] == expected_windows
+    assert all("/v1/hyperliquid/openinterest/BTC" in url for url, _, _ in calls[3:])
     assert len(points) == 3
     assert len({p.timestamp_ms for p in points}) == 3
 
