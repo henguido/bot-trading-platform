@@ -1,4 +1,5 @@
 from backend.connectors.crypto.binance_connector import BinanceConnector
+from backend.economia.ejecucion_05a import extraer_maker_bps
 from backend.economia.fuentes import extraer_taker_bps
 from backend.simulation.simulator import Simulator
 from backend.telemetria_http import (MEDIDOR_NULO, anotar_elementos,
@@ -13,14 +14,11 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
     """
     Devuelve activos crypto/USDT operables, balances y symbols_info.
 
-    04A-1: si `incluir_costes_cuenta=True`, devuelve además un cuarto elemento
-    con la fee taker observada en EL MISMO GET /api/v3/account que ya se hacía
+    Si `incluir_costes_cuenta=True`, devuelve además un cuarto elemento con las
+    fees maker/taker observadas en EL MISMO GET /api/v3/account que ya se hacía
     para balances. No añade ninguna petición.
 
-    El modo por defecto conserva exactamente la firma histórica de 3 elementos,
-    para no romper consumidores ajenos a 04A.
-
-    `medidor` es telemetria opcional. Cuando no se pasa se usa un medidor nulo.
+    El modo por defecto conserva exactamente la firma histórica de 3 elementos.
     """
     m = medidor if medidor is not None else MEDIDOR_NULO
     op_info = m.operacion("binance", "exchange_info")
@@ -36,17 +34,17 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
     except Exception as e:
         print(f"❌ Error al inicializar Binance o traer exchange info: {describir_error(e)}")
         if incluir_costes_cuenta:
-            return [], [], [], {"fee_taker_bps_por_lado": None,
-                                "fuente_fee": "NO_DISPONIBLE"}
+            return [], [], [], {
+                "fee_taker_bps_por_lado": None,
+                "fee_maker_bps_por_lado": None,
+                "fuente_fee": "NO_DISPONIBLE",
+                "fuente_fee_maker": "NO_DISPONIBLE",
+            }
         return [], [], []
 
     account_info = None
     balances = []
     try:
-        # Una sola llamada privada. Antes se delegaba a get_account_balance(),
-        # que internamente hacía get_account() y descartaba commissionRates.
-        # Ahora conservamos el mismo tráfico y aprovechamos ese payload para
-        # extraer la fee taker. Fallo/ausencia => fee desconocida, nunca cero.
         with op_saldos.peticion(observador=observador,
                                 exige_evidencia=True) as p:
             account_info = binance.client.get_account()
@@ -55,17 +53,9 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
                 b for b in balances_crudos
                 if float(b.get("free", 0) or 0) > 0 or float(b.get("locked", 0) or 0) > 0
             ]
-            # La respuesta de cuenta es evidencia positiva aunque todos los
-            # balances estén en cero. No confundimos "cuenta vacía" con fallo.
             if isinstance(account_info, dict):
                 p.marcar_ok()
     except Exception as e:
-        # Compatibilidad con el comportamiento anterior de get_account_balance:
-        # un fallo privado NO borra el universo público. Sólo deja balances y
-        # fee como desconocidos. En PAPER esto permite seguir analizando sin
-        # depender de que el endpoint de cuenta esté disponible.
-        # Se sanea porque una excepción de endpoint firmado puede incluir URL,
-        # timestamp o signature en su representación.
         print(f"❌ Error obteniendo el balance: {describir_error(e)}")
         account_info = None
         balances = []
@@ -92,11 +82,15 @@ def get_available_assets(medidor=None, *, incluir_costes_cuenta=False):
             })
 
     if incluir_costes_cuenta:
-        fee = extraer_taker_bps(account_info)
+        taker = extraer_taker_bps(account_info)
+        maker = extraer_maker_bps(account_info)
         return activos, balances, symbols_info, {
-            "fee_taker_bps_por_lado": float(fee) if fee is not None else None,
+            "fee_taker_bps_por_lado": float(taker) if taker is not None else None,
+            "fee_maker_bps_por_lado": float(maker) if maker is not None else None,
             "fuente_fee": ("binance_account.commissionRates.taker"
-                           if fee is not None else "NO_DISPONIBLE"),
+                           if taker is not None else "NO_DISPONIBLE"),
+            "fuente_fee_maker": ("binance_account.commissionRates.maker"
+                                 if maker is not None else "NO_DISPONIBLE"),
         }
     return activos, balances, symbols_info
 
@@ -142,7 +136,7 @@ def get_market_pairs(symbols_info=None, snapshot=None, medidor=None):
             pair_symbol = s["symbol"]
             precio = snapshot.get(pair_symbol)
             if precio is None:
-                continue          # sin precio conocido no se publica el par
+                continue
             pairs.append({"pair": pair_symbol, "price": float(precio)})
 
     anotar_elementos(op, len(pairs))
