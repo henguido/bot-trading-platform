@@ -45,6 +45,9 @@ def _serializar_evaluacion(info):
 
 
 def main():
+    if settings.MODO_REAL:
+        raise RuntimeError("05A probe solo puede ejecutarse en PAPER; LIVE bloqueado")
+
     activos, _balances, symbols_info, costes_cuenta = get_available_assets(
         incluir_costes_cuenta=True)
     fee = costes_cuenta.get("fee_taker_bps_por_lado")
