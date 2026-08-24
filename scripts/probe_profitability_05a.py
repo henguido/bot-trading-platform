@@ -6,8 +6,16 @@ de Binance y guarda un artefacto JSON sin credenciales.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
+
+# Al ejecutar `python scripts/probe_profitability_05a.py`, Python usa `scripts/`
+# como primer path de importacion. Insertamos la raiz del repo de forma
+# explicita para que el comando documentado funcione igual en Windows/Linux.
+RAIZ_REPO = Path(__file__).resolve().parents[1]
+if str(RAIZ_REPO) not in sys.path:
+    sys.path.insert(0, str(RAIZ_REPO))
 
 from backend import scanner
 from backend.config import settings
