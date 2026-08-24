@@ -58,6 +58,13 @@ yarn-debug.log*
 yarn-error.log*
 
 # ─────────────────────────────────────────────────────────────
+# Artefactos locales 05A — observación PAPER, nunca versionar estado vivo
+# ─────────────────────────────────────────────────────────────
+artifacts/profitability-probe-05a.json
+artifacts/profitability-shadow-05a-state.json
+artifacts/profitability-shadow-05a-summary.json
+
+# ─────────────────────────────────────────────────────────────
 # IDE / Sistema operativo
 # ─────────────────────────────────────────────────────────────
 .vscode/
