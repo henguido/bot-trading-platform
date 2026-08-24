@@ -134,9 +134,6 @@ class BinanceConnector:
             with op.peticion(observador=self.observador_http()):
                 tickers = self.client.get_all_tickers()
         except Exception as e:
-            # get_all_tickers SI propaga (BinanceAPIException,
-            # BinanceRequestException, TypeError), asi que la peticion queda
-            # anotada como error con su codigo real antes de llegar aqui.
             print(f"⚠️ No se pudo obtener el snapshot de precios: "
                   f"{type(e).__name__}: {e}")
             return {}
@@ -146,7 +143,7 @@ class BinanceConnector:
             try:
                 snapshot[t["symbol"]] = float(t["price"])
             except (KeyError, TypeError, ValueError):
-                continue          # un ticker ilegible se ignora, no se inventa
+                continue
         anotar_elementos(op, len(snapshot))
         return snapshot
 
@@ -155,16 +152,7 @@ class BinanceConnector:
         Metricas de mercado de TODOS los simbolos con UNA sola peticion REST.
 
         Fase BOT 2.0-03B. Usa `Client.get_ticker()` sin parametro `symbol`, que
-        es GET /api/v3/ticker/24hr completo. Auditado en real: 3.684 simbolos,
-        ~1,9 MiB, ~400 ms, cobertura 484/484 del universo y cero campos
-        ausentes. Trae en una sola respuesta lastPrice, bidPrice, askPrice,
-        quoteVolume, volume, highPrice, lowPrice, priceChangePercent y count.
-
-        Peso documentado por Binance para la variante sin `symbol`: 80. La
-        libreria no lo expone, asi que no se verifica localmente.
-
-        Devuelve {symbol: fila_cruda}. Si la peticion falla devuelve {}: sin
-        metricas el scanner no puntua nada, que es la direccion segura.
+        es GET /api/v3/ticker/24hr completo.
         """
         self.init_client()
         op = medicion if medicion is not None else OPERACION_NULA
@@ -181,29 +169,51 @@ class BinanceConnector:
             try:
                 metricas[f["symbol"]] = f
             except (KeyError, TypeError):
-                continue          # fila ilegible: se ignora, no se inventa
+                continue
         anotar_elementos(op, len(metricas))
         return metricas
 
     def get_multiple_prices(self, symbols, snapshot=None, medicion=None):
-        """
-        Precios de `symbols`, resueltos desde el snapshot batch del ciclo.
-
-        El contrato externo no cambia: entra una coleccion de simbolos, sale
-        {symbol: precio}. Lo que cambia es el coste. 02A midio 484 peticiones
-        aqui; ahora son CERO cuando el ciclo aporta su snapshot, y como maximo
-        UNA si nadie lo aporto.
-
-        Ya no existe camino por simbolo: no hay N+1 al que poder regresar.
-
-        Un simbolo ausente del snapshot NO aparece en la salida. Aguas abajo
-        `precios.get(symbol)` devuelve None y el activo se omite, exactamente
-        igual que antes ocurria con el 0.0 que dejaba un ticker fallido.
-        """
+        """Precios de `symbols`, resueltos desde el snapshot batch del ciclo."""
         op = medicion if medicion is not None else OPERACION_NULA
         if snapshot is None:
-            # Nadie aporto snapshot: se pide UNO, jamas uno por simbolo.
             snapshot = self.get_price_snapshot(medicion=medicion)
         prices = {s: snapshot[s] for s in symbols if s in snapshot}
         anotar_elementos(op, len(prices))
         return prices
+
+    def get_recent_klines(self, symbol, *, interval="1h", limit=1000, medicion=None):
+        """Una sola consulta publica de velas para UN finalista 05A.
+
+        El llamador limita cuantos simbolos llegan aqui. Devuelve filas crudas
+        de Binance; la estrategia elimina la vela aun abierta y valida datos.
+        Un fallo devuelve []: sin historia no existe edge, nunca cero.
+        """
+        self.init_client()
+        op = medicion if medicion is not None else OPERACION_NULA
+        try:
+            with op.peticion(observador=self.observador_http()):
+                filas = self.client.get_klines(symbol=symbol, interval=interval,
+                                               limit=int(limit))
+        except Exception as e:
+            print(f"⚠️ No se pudieron obtener velas de {symbol}: "
+                  f"{type(e).__name__}: {e}")
+            return []
+        anotar_elementos(op, len(filas or ()))
+        return filas or []
+
+    def get_order_book(self, symbol, *, limit=100, medicion=None):
+        """Profundidad publica acotada para estimar slippage pre-trade 05A."""
+        self.init_client()
+        op = medicion if medicion is not None else OPERACION_NULA
+        try:
+            with op.peticion(observador=self.observador_http()):
+                libro = self.client.get_order_book(symbol=symbol, limit=int(limit))
+        except Exception as e:
+            print(f"⚠️ No se pudo obtener profundidad de {symbol}: "
+                  f"{type(e).__name__}: {e}")
+            return {}
+        if isinstance(libro, dict):
+            anotar_elementos(op, len(libro.get("bids", ())) + len(libro.get("asks", ())))
+            return libro
+        return {}
