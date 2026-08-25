@@ -63,6 +63,7 @@ yarn-error.log*
 artifacts/profitability-probe-05a.json
 artifacts/profitability-shadow-05a-state.json
 artifacts/profitability-shadow-05a-summary.json
+artifacts/profitability-shadow-05a-diagnostics.json
 artifacts/scanner-alpha-shadow-05c-state.json
 artifacts/scanner-alpha-shadow-05c-summary.json
 artifacts/scanner-attribution-shadow-05d-state.json
