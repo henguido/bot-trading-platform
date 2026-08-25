@@ -85,6 +85,8 @@ def _serializar_evaluacion(info: dict) -> dict:
             "muestras": edge.muestras,
             "retorno_mediano_bps": edge.retorno_mediano_bps,
             "retorno_p25_bps": edge.retorno_p25_bps,
+            # 05F: telemetria solamente. 05A sigue decidiendo con p25.
+            "retorno_medio_bps": edge.retorno_medio_bps,
             "tasa_positiva": edge.tasa_positiva,
             "momentum_6h_bps": edge.momentum_6h_bps,
             "momentum_24h_bps": edge.momentum_24h_bps,
