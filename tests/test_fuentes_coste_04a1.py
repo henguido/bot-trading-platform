@@ -69,13 +69,15 @@ def test_get_available_assets_reutiliza_misma_peticion_de_cuenta(monkeypatch):
 
     activos, balances, info, costes = ac.get_available_assets(incluir_costes_cuenta=True)
 
-    assert cliente.account_calls == 1, "fee y balance deben salir del MISMO get_account"
+    assert cliente.account_calls == 1, "fees y balance deben salir del MISMO get_account"
     assert [a["symbol"] for a in activos] == ["BTCUSDT"]
     assert balances[0]["asset"] == "USDT"
     assert info == symbols
     assert costes == {
         "fee_taker_bps_por_lado": 10.0,
         "fuente_fee": "binance_account.commissionRates.taker",
+        "fee_maker_bps_por_lado": None,
+        "fuente_fee_maker": "NO_DISPONIBLE",
     }
 
 
@@ -122,6 +124,8 @@ def test_fallo_de_cuenta_no_borra_universo_publico(monkeypatch):
     assert balances == []
     assert costes["fee_taker_bps_por_lado"] is None
     assert costes["fuente_fee"] == "NO_DISPONIBLE"
+    assert costes["fee_maker_bps_por_lado"] is None
+    assert costes["fuente_fee_maker"] == "NO_DISPONIBLE"
 
 
 # ── Slippage por profundidad ────────────────────────────────────────────────
