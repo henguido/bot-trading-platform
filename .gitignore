@@ -58,13 +58,15 @@ yarn-debug.log*
 yarn-error.log*
 
 # ─────────────────────────────────────────────────────────────
-# Artefactos locales 05A/05C — observación PAPER, nunca versionar estado vivo
+# Artefactos locales 05A/05C/05D — observación PAPER, nunca versionar estado vivo
 # ─────────────────────────────────────────────────────────────
 artifacts/profitability-probe-05a.json
 artifacts/profitability-shadow-05a-state.json
 artifacts/profitability-shadow-05a-summary.json
 artifacts/scanner-alpha-shadow-05c-state.json
 artifacts/scanner-alpha-shadow-05c-summary.json
+artifacts/scanner-attribution-shadow-05d-state.json
+artifacts/scanner-attribution-shadow-05d-summary.json
 
 # ─────────────────────────────────────────────────────────────
 # IDE / Sistema operativo
