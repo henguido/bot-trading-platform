@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 Write-Host "[SHADOW-05] Runner combinado PAPER. Ctrl+C para detener."
-Write-Host "[SHADOW-05] Ejecuta 05A rentabilidad, 05C alpha scanner y 05D atribucion."
+Write-Host "[SHADOW-05] Ejecuta 05A rentabilidad, diagnostico 05A, 05C alpha scanner y 05D atribucion."
 Write-Host "[SHADOW-05] Cadencia: $Hours horas."
 
 while ($true) {
@@ -15,6 +15,9 @@ while ($true) {
 
     python scripts\shadow_profitability_05a.py
     if ($LASTEXITCODE -ne 0) { throw "05A fallo con codigo $LASTEXITCODE" }
+
+    python scripts\analyze_profitability_shadow_05a.py
+    if ($LASTEXITCODE -ne 0) { throw "Diagnostico 05A fallo con codigo $LASTEXITCODE" }
 
     python scripts\shadow_scanner_alpha_05c.py
     if ($LASTEXITCODE -ne 0) { throw "05C fallo con codigo $LASTEXITCODE" }
