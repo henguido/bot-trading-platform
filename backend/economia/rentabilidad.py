@@ -9,6 +9,8 @@ Reglas:
 - si el coste round-trip no esta completo, la oportunidad es NO_EVALUABLE;
 - si la estrategia no aporta edge bruto cuantificable, es NO_EVALUABLE;
 - el edge neto es edge bruto - coste total round-trip;
+- una operacion debe dejar beneficio neto estrictamente positivo incluso si el
+  margen minimo configurado es 0;
 - el margen neto minimo es una politica explicita del llamador, no un numero
   optimizado aqui;
 - el multiplo edge/coste se reporta como telemetria, no es un gate oculto.
@@ -92,7 +94,8 @@ def evaluar_rentabilidad(*, edge_bruto_bps, costes: EstimacionCostes,
 
     `margen_neto_minimo_bps` debe declararse fuera de este modulo. Esto evita
     convertir 05A en una optimizacion post-hoc de umbrales. Puede ser cero para
-    una medicion exploratoria PAPER, pero debe pasarse de forma explicita.
+    una medicion exploratoria PAPER, pero aun asi la operacion debe conservar
+    beneficio neto estrictamente positivo.
     """
     if not isinstance(costes, EstimacionCostes):
         raise TypeError("costes debe ser EstimacionCostes")
@@ -133,7 +136,10 @@ def evaluar_rentabilidad(*, edge_bruto_bps, costes: EstimacionCostes,
 
     if edge <= 0:
         motivos.append(EDGE_NO_POSITIVO)
-    if neto_bps < margen:
+    # Beneficio neto cero nunca es una oportunidad rentable. Si margen=0,
+    # seguimos exigiendo neto > 0; con margen positivo, exigimos al menos ese
+    # margen explicito.
+    if neto_bps <= 0 or neto_bps < margen:
         motivos.append(MARGEN_NETO_INSUFICIENTE)
 
     apta = not motivos
