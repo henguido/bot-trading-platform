@@ -54,12 +54,13 @@ def test_rechaza_edge_positivo_si_no_deja_margen_neto_requerido():
     assert r.motivos == (MARGEN_NETO_INSUFICIENTE,)
 
 
-def test_edge_igual_al_coste_puede_medirse_con_margen_cero_pero_no_con_margen_positivo():
+def test_edge_igual_al_coste_no_es_rentable_aun_con_margen_cero():
     base = costes_completos()
     exploratoria = evaluar_rentabilidad(
         edge_bruto_bps="18", costes=base, margen_neto_minimo_bps="0")
-    assert exploratoria.apta is True
+    assert exploratoria.apta is False
     assert exploratoria.edge_neto_bps == Decimal("0")
+    assert exploratoria.motivos == (MARGEN_NETO_INSUFICIENTE,)
 
     conservadora = evaluar_rentabilidad(
         edge_bruto_bps="18", costes=base, margen_neto_minimo_bps="0.01")
