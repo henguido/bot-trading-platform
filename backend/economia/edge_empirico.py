@@ -5,9 +5,11 @@ velas 1h YA cerradas y pregunta una cosa simple: cuando el activo estuvo antes
 en un estado de tendencia comparable al actual, cuanto rindio en las siguientes
 4 horas?
 
-Para evitar una expectativa optimista, el edge bruto publicado es el percentil
-25 de esos retornos historicos, no la media. Si no hay suficientes muestras o
-el estado actual no es alcista, no hay edge utilizable.
+Para evitar una expectativa optimista, el edge bruto publicado por 05A sigue
+siendo el percentil 25 de esos retornos historicos, no la media. La media se
+expone SOLO como telemetria de calibracion 05F; no participa en decisiones.
+Si no hay suficientes muestras o el estado actual no es alcista, no hay edge
+utilizable.
 
 El modulo es puro: no hace red, BD, LLM ni trading.
 """
@@ -47,6 +49,9 @@ class EstimacionEdge:
     momentum_6h_bps: Optional[float]
     momentum_24h_bps: Optional[float]
     horizonte_h: int = HORIZONTE_H
+    # Telemetria 05F. Se agrega al final para no cambiar la semantica ni las
+    # construcciones posicionales existentes de EstimacionEdge.
+    retorno_medio_bps: Optional[float] = None
 
     @property
     def utilizable(self) -> bool:
@@ -122,6 +127,9 @@ def estimar_edge(velas: Sequence[VelaCerrada], *, muestras_minimas: int = MUESTR
     historicos necesitan futuro completo de `HORIZONTE_H`, por lo que las
     ultimas velas nunca entran como entrenamiento. Para reducir dependencia por
     retornos superpuestos, tras aceptar una muestra se avanza un horizonte.
+
+    05A conserva `edge_bruto_bps = p25`. `retorno_medio_bps` se publica solo
+    para comparar calibracion OOS en 05F; no modifica ningun gate.
     """
     if isinstance(muestras_minimas, bool) or int(muestras_minimas) < 1:
         raise ValueError("muestras_minimas debe ser entero positivo")
@@ -157,9 +165,13 @@ def estimar_edge(velas: Sequence[VelaCerrada], *, muestras_minimas: int = MUESTR
 
     mediana = _percentil_lineal(retornos, 0.50)
     p25 = _percentil_lineal(retornos, 0.25)
+    media = sum(retornos) / n
     tasa = sum(1 for r in retornos if r > 0) / n
 
     # El p25 puede ser negativo. Se publica tal cual: el gate de rentabilidad
-    # sera quien lo rechace, sin ocultar evidencia desfavorable.
+    # sera quien lo rechace, sin ocultar evidencia desfavorable. La media queda
+    # como telemetria y no sustituye al p25 en 05A.
     return EstimacionEdge(
-        ESTADO_APTO, p25, n, mediana, p25, tasa, mom6, mom24)
+        ESTADO_APTO, p25, n, mediana, p25, tasa, mom6, mom24,
+        retorno_medio_bps=media,
+    )
