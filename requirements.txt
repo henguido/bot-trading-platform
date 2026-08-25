@@ -1,7 +1,15 @@
-python-binance
-aiohttp
-cryptography
-requests
-python-dotenv
-beautifulsoup4
-feedparser
+# Wrapper de compatibilidad para instalaciones desde la raiz.
+#
+# La fuente canonica de dependencias runtime es backend/requirements.txt.
+# constraints.txt fija las versiones del conjunto Python verificado.
+#
+# Runtime reproducible:
+#   python -m pip install -r requirements.txt
+#
+# Desarrollo/pruebas, ademas:
+#   python -m pip install -r requirements-dev.txt -c constraints.txt
+#
+# No mantener una segunda lista de paquetes aqui: fue la causa de entornos
+# parciales donde faltaban dependencias centrales como SQLAlchemy.
+-c constraints.txt
+-r backend/requirements.txt
