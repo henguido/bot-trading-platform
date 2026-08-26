@@ -32,6 +32,11 @@ from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_petic
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
 from backend import scanner
 from backend.economia.profundidad import obtener_order_book
+from backend.economia.integracion_05e import (
+    PROFITABILITY_GATE_05E_ENABLED,
+    aplicar_pre_llm_05e,
+    compra_post_llm_permitida_05e,
+)
 from backend.simulation.paper_api import historial_paper, resumen_paper
 from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
@@ -547,6 +552,43 @@ def trading_loop():
             print(resumen_scanner.linea(
                 int((time.perf_counter() - inicio_scanner) * 1000), requests=0))
 
+            # Contrato 05E ya cableado, pero congelado en False hasta que
+            # la evidencia OOS justifique promoverlo. Desactivado no hace
+            # red, no recalcula candidatos y conserva el comportamiento.
+            notional_rentabilidad = {}
+            if PROFITABILITY_GATE_05E_ENABLED:
+                estado_pre_llm = cartera.estado_riesgo()
+                capital_pre_llm = cartera.capital_disponible()
+                for candidato in activos_para_gpt:
+                    if candidato.get("_position_detected"):
+                        continue
+                    sym = candidato.get("symbol")
+                    if not sym:
+                        continue
+                    limite = motor_riesgo.limite_compra(
+                        capital_disponible=capital_pre_llm,
+                        estado=estado_pre_llm,
+                        symbol=sym,
+                    )
+                    if limite.quote_permitido and limite.quote_permitido > 0:
+                        notional_rentabilidad[sym] = limite.quote_permitido
+
+            pre_llm_05e = aplicar_pre_llm_05e(
+                activos_para_gpt,
+                metricas_mercado,
+                fee_taker_bps_por_lado=costes_cuenta.get(
+                    "fee_taker_bps_por_lado"),
+                notional_por_symbol=notional_rentabilidad,
+                binance=binance,
+                medidor=medidor,
+                enabled=PROFITABILITY_GATE_05E_ENABLED,
+                modo_real=settings.MODO_REAL,
+            )
+            activos_para_gpt = list(pre_llm_05e.activos)
+            evaluaciones_rentabilidad_05e = pre_llm_05e.evaluaciones
+            if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:
+                print(pre_llm_05e.resumen.linea())
+
             activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))
 
             print(f"🎯 Enviando {len(activos_para_gpt)} activos a GPT para análisis")
@@ -639,6 +681,15 @@ def trading_loop():
 
                 if decision in ("COMPRAR", "VENDER"):
                     lado = Lado.COMPRA if decision == "COMPRAR" else Lado.VENTA
+
+                    if lado is Lado.COMPRA:
+                        permitida_05e, motivo_05e = compra_post_llm_permitida_05e(
+                            symbol, evaluaciones_rentabilidad_05e,
+                            enabled=PROFITABILITY_GATE_05E_ENABLED,
+                        )
+                        if not permitida_05e:
+                            print(f"[RENTABILIDAD-05E] {symbol} bloqueada: {motivo_05e}")
+                            continue
 
                     # Estado de riesgo FRESCO por decision: la exposicion puede
                     # cambiar dentro del propio ciclo si se ejecutan varias
