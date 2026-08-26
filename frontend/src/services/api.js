@@ -64,6 +64,11 @@ export function getTransaccionesReales() {
   return apiFetch("/api/transacciones-reales");
 }
 
+export function getDecisionCycles(limite = 12) {
+  const seguro = Math.max(1, Math.min(Number(limite) || 12, 100));
+  return apiFetch(`/api/decision-cycles?limite=${seguro}`);
+}
+
 export function getHealth() {
   return apiFetch("/health", {}, { auth: false });
 }
