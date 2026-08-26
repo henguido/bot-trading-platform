@@ -1,0 +1,81 @@
+name: one-shot-release-paper-v1-config
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+
+      - name: Patch release defaults and CORS
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f"{path}: expected exactly 1 match, got {n}: {old!r}")
+              p.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_exact(
+              "backend/main.py",
+              '    allow_origins=["http://localhost:5173"],',
+              '    allow_origins=list(settings.CORS_ORIGINS),',
+          )
+
+          replace_exact(
+              "backend/config/settings.py",
+              "# Capital inicial del libro PAPER. Unidad: USDT. Solo se usa con MODO_REAL=False.\nINITIAL_CAPITAL_USD = _leer_float('INITIAL_CAPITAL_USD', 20.0, minimo=0.0)",
+              "# Capital inicial del libro PAPER. Unidad: USDT. Solo se usa con MODO_REAL=False.\nDEFAULT_INITIAL_CAPITAL_USD = 500.0\nINITIAL_CAPITAL_USD = _leer_float('INITIAL_CAPITAL_USD', DEFAULT_INITIAL_CAPITAL_USD, minimo=0.0)",
+          )
+
+          replace_exact(
+              "backend/config/settings.py",
+              "# Fraccion del capital disponible asignable a UNA operacion. Unidad: fraccion 0..1.\n# Sustituye conceptualmente a RISK_PER_TRADE, que se acepta como alias.\nLIMITE_ASIGNACION_POR_OPERACION = _leer_float(\n    'LIMITE_ASIGNACION_POR_OPERACION', 0.1, minimo=0.0, maximo=1.0, alias='RISK_PER_TRADE')",
+              "# Fraccion del capital disponible asignable a UNA operacion. Unidad: fraccion 0..1.\n# Sustituye conceptualmente a RISK_PER_TRADE, que se acepta como alias.\nDEFAULT_LIMITE_ASIGNACION_POR_OPERACION = 0.02\nLIMITE_ASIGNACION_POR_OPERACION = _leer_float(\n    'LIMITE_ASIGNACION_POR_OPERACION', DEFAULT_LIMITE_ASIGNACION_POR_OPERACION,\n    minimo=0.0, maximo=1.0, alias='RISK_PER_TRADE')",
+          )
+
+          replace_exact(
+              "backend/config/settings.py",
+              '# 🌍 Configuración del servidor FastAPI\nAPI_HOST = "0.0.0.0"\nAPI_PORT = 8000',
+              '# 🌍 Configuración del servidor FastAPI\nAPI_HOST = "0.0.0.0"\nAPI_PORT = 8000\n\n# Origins permitidos para el frontend. Con credenciales no se acepta wildcard.\n# En desarrollo el frontend Vite local funciona sin configurar nada; en\n# produccion la lista debe definirse explicitamente para evitar un despliegue\n# que parezca sano pero bloquee todas las peticiones del navegador.\n_cors_default = "" if ES_PRODUCCION else "http://localhost:5173"\n_cors_raw = os.getenv("CORS_ORIGINS", _cors_default)\nCORS_ORIGINS = tuple(\n    origin.strip() for origin in _cors_raw.split(",") if origin.strip()\n)\nif not CORS_ORIGINS:\n    raise RuntimeError(\n        "CORS_ORIGINS debe contener al menos un origen permitido. "\n        "En produccion es obligatorio definirlo explicitamente.")\nif "*" in CORS_ORIGINS:\n    raise RuntimeError(\n        "CORS_ORIGINS no admite * porque la API usa credenciales/JWT; "\n        "define origenes explicitos separados por coma.")',
+          )
+
+          replace_exact(
+              ".env.example",
+              "# development (por defecto) | test | production\nAPP_ENV=development",
+              "# development (por defecto) | test | production\nAPP_ENV=development\n\n# Origenes web autorizados, separados por coma. En production es obligatorio.\nCORS_ORIGINS=http://localhost:5173",
+          )
+          replace_exact(
+              ".env.example",
+              "INITIAL_CAPITAL_USD=20",
+              "INITIAL_CAPITAL_USD=500",
+          )
+          replace_exact(
+              ".env.example",
+              '# clasico riesgo/distancia-al-stop. Es un limite de ASIGNACION. Default: 0.1\nLIMITE_ASIGNACION_POR_OPERACION=0.1',
+              '# clasico riesgo/distancia-al-stop. Es un limite de ASIGNACION. Default: 0.02\nLIMITE_ASIGNACION_POR_OPERACION=0.02',
+          )
+          PY
+
+          git diff --check
+          git rm .github/workflows/one-shot-release-paper-v1-config.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/main.py backend/config/settings.py .env.example
+          git commit -m "fix(paper): alinea defaults y CORS de release v1"
+          git push
