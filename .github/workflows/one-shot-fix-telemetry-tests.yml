@@ -1,0 +1,75 @@
+name: one-shot-fix-telemetry-tests
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+    paths:
+      - .github/workflows/one-shot-fix-telemetry-tests.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+      - name: Apply exact historical-migration test fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_telemetria_http.py')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''def test_0005_es_la_cabeza_y_encadena_con_0004():
+              from backend.esquema import revision_esperada
+
+              assert revision_esperada() == "0005_telemetria_http"
+              fuente = MIGRACION.read_text(encoding="utf-8")
+              assert 'down_revision = "0004_telemetria"' in fuente
+          '''
+          # The source has four-space indentation; normalize the literal above.
+          old = '\n'.join(line[4:] if line.startswith('    ') else line for line in old.splitlines()) + '\n'
+          new = '''def test_0005_declara_su_revision_y_encadena_con_0004():
+              fuente = MIGRACION.read_text(encoding="utf-8")
+              assert 'revision = "0005_telemetria_http"' in fuente
+              assert 'down_revision = "0004_telemetria"' in fuente
+          '''
+          new = '\n'.join(line[4:] if line.startswith('    ') else line for line in new.splitlines()) + '\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one historical-head block, got {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          marker = 'def test_0005_sobre_bd_con_datos_previos_solo_agrega(url_tmp):'
+          start = text.index(marker)
+          end = text.index('\ndef test_0005_solo_agrega_no_altera_ni_borra', start)
+          segment = text[start:end]
+          needle = 'command.upgrade(_alembic(url_tmp), "head")'
+          if segment.count(needle) != 1:
+              raise SystemExit(f'expected exactly one head upgrade in historical-data test, got {segment.count(needle)}')
+          segment = segment.replace(
+              needle,
+              'command.upgrade(_alembic(url_tmp), "0005_telemetria_http")',
+              1,
+          )
+          text = text[:start] + segment + text[end:]
+
+          if 'def test_0005_es_la_cabeza_y_encadena_con_0004' in text:
+              raise SystemExit('stale global-head assertion still present')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Self-remove helper workflow and commit only intended patch
+        shell: bash
+        run: |
+          rm .github/workflows/one-shot-fix-telemetry-tests.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_telemetria_http.py .github/workflows/one-shot-fix-telemetry-tests.yml
+          git diff --cached --check
+          git commit -m "test(telemetria): desacopla 0005 del head global"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
