@@ -8,6 +8,7 @@ mide P&L en USDT con el mismo modelo de ejecución PAPER:
 - CHALLENGER_05J rerankea el mismo Top-20 con los pesos OOS congelados;
 - MotorRiesgo calcula el tamaño, no este script;
 - entrada y salida usan profundidad pública real, VWAP, slippage y fee conocida;
+- LOT_SIZE y NOTIONAL se toman del exchangeInfo público actual y son fail-closed;
 - horizonte objetivo: el `due_at` ya congelado por 05I (~4 h);
 - sin LLM, sin BD, sin órdenes y sin tocar pesos del scanner.
 
@@ -34,7 +35,7 @@ from backend.app.services.ordenes import Lado
 from backend.config import settings
 from backend.connectors.crypto.binance_connector import BinanceConnector
 from backend.economia.ejecucion_paper import calcular_fill_compra, calcular_fill_venta
-from backend.risk import reloj
+from backend.risk import elegibilidad, reloj
 from backend.risk.estado import EstadoRiesgo, Posicion
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from scripts.analyze_scanner_challenger_05j import CHALLENGER_WEIGHTS
@@ -89,6 +90,7 @@ def nuevo_estado(capital: float | None = None) -> dict:
         "processed_buckets": [],
         "ignored_stale_buckets": [],
         "orderbook_calls": 0,
+        "exchange_info_calls": 0,
         "portfolios": {
             PORTFOLIO_BASE: _nuevo_portafolio(inicial),
             PORTFOLIO_CHALLENGER: _nuevo_portafolio(inicial),
@@ -105,6 +107,8 @@ def cargar_estado() -> dict:
     for nombre in PORTFOLIOS:
         if nombre not in data["portfolios"]:
             raise RuntimeError(f"estado 05K carece de {nombre}")
+    # Compatibilidad con estados 05K creados antes de modelar exchangeInfo.
+    data.setdefault("exchange_info_calls", 0)
     return data
 
 
@@ -182,7 +186,31 @@ def _book(binance, cache: dict, symbol: str, state: dict):
     return cache[symbol]
 
 
-def _cerrar_vencidas(state: dict, binance, now: datetime, cache: dict) -> int:
+def _exchange_info(binance, cache: dict, state: dict) -> dict:
+    """Carga exchangeInfo una sola vez y solo si una entrada/salida lo necesita."""
+    if "symbols" not in cache:
+        cache["symbols"] = binance.get_exchange_symbols_info()
+        state["exchange_info_calls"] = int(state.get("exchange_info_calls", 0)) + 1
+    data = cache["symbols"]
+    return data if isinstance(data, dict) else {}
+
+
+def _filtros(binance, cache: dict, state: dict, symbol: str):
+    info = _exchange_info(binance, cache, state).get(symbol)
+    return elegibilidad.leer_filtros(info)
+
+
+def _kwargs_filtros(filtros) -> dict:
+    return {
+        "step_size": filtros.step_size,
+        "min_qty": filtros.min_qty,
+        "max_qty": filtros.max_qty,
+        "min_notional": filtros.min_notional,
+    }
+
+
+def _cerrar_vencidas(state: dict, binance, now: datetime, cache_books: dict,
+                     cache_exchange: dict) -> int:
     cerradas = 0
     for nombre in PORTFOLIOS:
         portfolio = state["portfolios"][nombre]
@@ -191,12 +219,20 @@ def _cerrar_vencidas(state: dict, binance, now: datetime, cache: dict) -> int:
             if _parse(pos["due_at"]) > now:
                 siguen.append(pos)
                 continue
-            libro = _book(binance, cache, pos["symbol"], state)
+
+            filtros = _filtros(binance, cache_exchange, state, pos["symbol"])
+            if filtros is None:
+                pos["last_exit_error"] = "FILTROS_EXCHANGE_NO_DISPONIBLES"
+                siguen.append(pos)
+                continue
+
+            libro = _book(binance, cache_books, pos["symbol"], state)
             try:
                 fill = calcular_fill_venta(
                     order_book=libro,
                     base_quantity=pos["base_quantity"],
                     fee_taker_bps_por_lado=pos["fee_taker_bps_por_lado"],
+                    **_kwargs_filtros(filtros),
                 )
             except Exception as exc:
                 pos["last_exit_error"] = f"{type(exc).__name__}: {exc}"
@@ -204,6 +240,14 @@ def _cerrar_vencidas(state: dict, binance, now: datetime, cache: dict) -> int:
                 continue
             if not fill.completo:
                 pos["last_exit_error"] = fill.motivo or fill.estado
+                siguen.append(pos)
+                continue
+
+            # La contabilidad 05K cierra lotes completos. Si un cambio de
+            # LOT_SIZE actual obligara a vender menos que la posicion, no se
+            # atribuye un P&L ficticio a todo el coste: se mantiene abierta.
+            if abs(float(fill.base_ejecutada) - float(pos["base_quantity"])) > 1e-12:
+                pos["last_exit_error"] = "LOT_SIZE_SALIDA_PARCIAL_NO_MODELADA"
                 siguen.append(pos)
                 continue
 
@@ -221,6 +265,10 @@ def _cerrar_vencidas(state: dict, binance, now: datetime, cache: dict) -> int:
                 "exit_slippage_bps": float(fill.slippage_bps),
                 "pnl_realizado_usd": pnl,
                 "retorno_realizado_neto_bps": pnl / coste * 10_000.0,
+                "exit_step_size": float(filtros.step_size),
+                "exit_min_qty": float(filtros.min_qty),
+                "exit_max_qty": float(filtros.max_qty),
+                "exit_min_notional": float(filtros.min_notional),
             })
             cerradas += 1
         portfolio["open_positions"] = siguen
@@ -228,7 +276,8 @@ def _cerrar_vencidas(state: dict, binance, now: datetime, cache: dict) -> int:
 
 
 def _entrada_fresca(estado_05i: dict, state: dict, binance, now: datetime,
-                    cache: dict, motor: MotorRiesgo) -> int:
+                    cache_books: dict, cache_exchange: dict,
+                    motor: MotorRiesgo) -> int:
     bucket = estado_05i.get("last_run_bucket")
     if not bucket:
         return 0
@@ -273,15 +322,21 @@ def _entrada_fresca(estado_05i: dict, state: dict, binance, now: datetime,
                 })
                 continue
 
+            filtros = _filtros(binance, cache_exchange, state, symbol)
+            if filtros is None:
+                portfolio["skipped_entries"].append({
+                    "run_bucket": bucket, "symbol": symbol,
+                    "reason": "FILTROS_EXCHANGE_NO_DISPONIBLES",
+                })
+                continue
+
             riesgo = _estado_riesgo_virtual(portfolio, now)
             propuesta = PropuestaOperacion(
                 symbol=symbol,
                 side=Lado.COMPRA,
                 precio=float(obs["entry_price"]),
                 base_quantity_modelo=None,
-                # 05K mide economía de ejecución; el min-notional del exchange
-                # no está persistido todavía en 05I y por eso se declara 0.
-                min_notional=0.0,
+                min_notional=float(filtros.min_notional),
             )
             veredicto = motor.evaluar(
                 propuesta,
@@ -298,12 +353,13 @@ def _entrada_fresca(estado_05i: dict, state: dict, binance, now: datetime,
             aprobado_total = Decimal(str(veredicto.approved_quote_amount))
             fee_decimal = Decimal(str(fee))
             bruto_objetivo = aprobado_total / (Decimal("1") + fee_decimal / _BPS)
-            libro = _book(binance, cache, symbol, state)
+            libro = _book(binance, cache_books, symbol, state)
             try:
                 fill = calcular_fill_compra(
                     order_book=libro,
                     quote_amount=bruto_objetivo,
                     fee_taker_bps_por_lado=fee_decimal,
+                    **_kwargs_filtros(filtros),
                 )
             except Exception as exc:
                 portfolio["skipped_entries"].append({
@@ -339,6 +395,10 @@ def _entrada_fresca(estado_05i: dict, state: dict, binance, now: datetime,
                 "entry_fee_usd": float(fill.fee_usd),
                 "entry_slippage_bps": float(fill.slippage_bps),
                 "fee_taker_bps_por_lado": float(fee),
+                "entry_step_size": float(filtros.step_size),
+                "entry_min_qty": float(filtros.min_qty),
+                "entry_max_qty": float(filtros.max_qty),
+                "entry_min_notional": float(filtros.min_notional),
             })
             abiertas += 1
 
@@ -426,9 +486,12 @@ def construir_resumen(state: dict) -> dict:
         "backfill_allowed": False,
         "entry_freshness_max_seconds": MAX_ENTRY_DELAY_SECONDS,
         "risk_engine_used_for_sizing": True,
-        "exchange_min_notional_checked": False,
-        "execution_model": "ORDER_BOOK_VWAP_TAKER_FEE",
+        "exchange_min_notional_checked": True,
+        "exchange_lot_size_checked": True,
+        "exchange_filters_source": "BINANCE_EXCHANGE_INFO_CURRENT",
+        "execution_model": "ORDER_BOOK_VWAP_TAKER_FEE_EXCHANGE_FILTERS",
         "orderbook_calls": int(state.get("orderbook_calls", 0)),
+        "exchange_info_calls": int(state.get("exchange_info_calls", 0)),
         "processed_buckets": len(state.get("processed_buckets", [])),
         "ignored_stale_buckets": len(state.get("ignored_stale_buckets", [])),
         "portfolios": portfolios,
@@ -439,7 +502,8 @@ def construir_resumen(state: dict) -> dict:
         "paired_buckets": paired,
         "interpretation": (
             "Ejecucion prospectiva de Top-5 base y challenger con sizing del "
-            "MotorRiesgo, profundidad real y fees; no autoriza trading real."
+            "MotorRiesgo, filtros actuales de Binance, profundidad real y fees; "
+            "no autoriza trading real."
         ),
     }
 
@@ -447,9 +511,12 @@ def construir_resumen(state: dict) -> dict:
 def procesar(estado_05i: dict, state: dict, binance, now: datetime,
              motor: MotorRiesgo | None = None) -> tuple[int, int, dict]:
     motor = motor or MotorRiesgo()
-    cache = {}
-    cerradas = _cerrar_vencidas(state, binance, now, cache)
-    abiertas = _entrada_fresca(estado_05i, state, binance, now, cache, motor)
+    cache_books = {}
+    cache_exchange = {}
+    cerradas = _cerrar_vencidas(
+        state, binance, now, cache_books, cache_exchange)
+    abiertas = _entrada_fresca(
+        estado_05i, state, binance, now, cache_books, cache_exchange, motor)
     state["last_run_at"] = _iso(now)
     return abiertas, cerradas, construir_resumen(state)
 
@@ -467,7 +534,7 @@ def main() -> None:
     print(
         f"[SHADOW-05K] abiertas={abiertas} cerradas={cerradas} "
         f"buckets={summary['processed_buckets']} paired={summary['paired_complete_buckets']} "
-        f"books={summary['orderbook_calls']}"
+        f"books={summary['orderbook_calls']} exchangeInfo={summary['exchange_info_calls']}"
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     print(f"state={STATE.relative_to(RAIZ_REPO)}")
