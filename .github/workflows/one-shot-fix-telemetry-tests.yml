@@ -33,14 +33,11 @@ jobs:
               fuente = MIGRACION.read_text(encoding="utf-8")
               assert 'down_revision = "0004_telemetria"' in fuente
           '''
-          # The source has four-space indentation; normalize the literal above.
-          old = '\n'.join(line[4:] if line.startswith('    ') else line for line in old.splitlines()) + '\n'
           new = '''def test_0005_declara_su_revision_y_encadena_con_0004():
               fuente = MIGRACION.read_text(encoding="utf-8")
               assert 'revision = "0005_telemetria_http"' in fuente
               assert 'down_revision = "0004_telemetria"' in fuente
           '''
-          new = '\n'.join(line[4:] if line.startswith('    ') else line for line in new.splitlines()) + '\n'
           if text.count(old) != 1:
               raise SystemExit(f'expected exactly one historical-head block, got {text.count(old)}')
           text = text.replace(old, new, 1)
