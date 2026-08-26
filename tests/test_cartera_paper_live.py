@@ -140,7 +140,7 @@ def test_paper_persiste_compra_reinicia_y_cierra_con_pnl_neto(fabrica, usuario_i
         assert ops[0].fee_usd > 0 and ops[1].fee_usd > 0
         # El ledger PAPER no contamina ninguna tabla de ejecución LIVE.
         assert db.query(models.Transaction).count() == 0
-        assert db.query(models.Order).count() == 0
+        assert db.query(models.Orden).count() == 0
         assert db.query(models.Fill).count() == 0
 
 
