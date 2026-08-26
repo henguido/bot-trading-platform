@@ -64,6 +64,10 @@ export function getTransaccionesReales() {
   return apiFetch("/api/transacciones-reales");
 }
 
+export function getHealth() {
+  return apiFetch("/health", {}, { auth: false });
+}
+
 export async function getWelcomeMessage() {
   const data = await apiFetch("/", {}, { auth: false });
   return data.message;
