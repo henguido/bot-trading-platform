@@ -32,6 +32,7 @@ from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_petic
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
 from backend import scanner
 from backend.economia.profundidad import obtener_order_book
+from backend.simulation.paper_api import historial_paper, resumen_paper
 from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import (
@@ -807,6 +808,9 @@ def get_historial(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    if not settings.MODO_REAL:
+        return historial_paper(db, usuario_id=current_user.id)
+
     auditorias = db.query(models.DecisionAudit).order_by(models.DecisionAudit.timestamp.desc()).all()
     historial = []
 
@@ -835,7 +839,18 @@ def get_historial(
     return historial
 
 @app.get("/api/resumen")
-def resumen_portafolio(current_user: models.User = Depends(get_current_user)):
+def resumen_portafolio(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not settings.MODO_REAL:
+        return resumen_paper(
+            db,
+            usuario_id=current_user.id,
+            initial_capital_usd=settings.INITIAL_CAPITAL_USD,
+            obtener_precio=binance.get_current_price,
+        )
+
     balances = binance.get_account_balance()
     resumen = []
     valor_total = 0.0
