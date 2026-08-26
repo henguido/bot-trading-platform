@@ -1,23 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Ruta al backend y frontend
-BACKEND_DIR="./bot"
-FRONTEND_DIR="./frontend"
+# Arranque backend production-like desde la raiz real del repositorio.
+#
+# - un solo worker: evita multiplicar procesos de trading;
+# - sin --reload: no respawnea el proceso operativo;
+# - no aplica migraciones automaticamente: Alembic sigue siendo una operacion
+#   explicita de despliegue (`alembic upgrade head`);
+# - PORT puede ser inyectado por cualquier plataforma; local usa 8000.
 
-# Comando para backend
-# Sin recarga automatica y con un unico worker, a proposito (P0-13): la recarga
-# respawnea el proceso y varios workers crean varios procesos, cada uno
-# intentando operar. El candado de liderazgo lo impediria, pero no conviene
-# provocarlo en un script que pretende parecerse a produccion.
-BACKEND_CMD="uvicorn backend.main:app --workers 1"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
 
-# Comando para frontend
-FRONTEND_CMD="npm run dev"
+HOST="${API_HOST:-0.0.0.0}"
+PORT="${PORT:-8000}"
 
-# Abre nueva terminal para el backend
-gnome-terminal -- bash -c "cd $BACKEND_DIR && $BACKEND_CMD; exec bash"
-
-# Abre nueva terminal para el frontend
-gnome-terminal -- bash -c "cd $FRONTEND_DIR && $FRONTEND_CMD; exec bash"
-
-echo "🚀 Proyecto iniciado: Backend (bot) y Frontend corriendo en terminales separadas."
+echo "[START] BOT Trading Platform backend ${HOST}:${PORT}"
+exec python -m uvicorn backend.main:app --host "$HOST" --port "$PORT" --workers 1
