@@ -31,6 +31,7 @@ from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
 from backend import scanner
+from backend.economia.profundidad import obtener_order_book
 from backend.risk import elegibilidad
 from backend.risk.motor import MotorRiesgo, PropuestaOperacion
 from backend.portafolio.carteras import (
@@ -321,8 +322,11 @@ def trading_loop():
             print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             try:
-                assets_disponibles, balances_reales, symbols_info = get_available_assets(
-                    medidor=medidor)
+                # Reutiliza el MISMO GET /account que ya obtiene balances para
+                # extraer la fee taker. No añade una peticion al ciclo.
+                resultado_assets = get_available_assets(
+                    medidor=medidor, incluir_costes_cuenta=True)
+                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets
             except Exception as e:
                 print(f"❌ Error al inicializar Binance o traer datos: {e}")
                 esperar_ciclo = True
@@ -385,6 +389,18 @@ def trading_loop():
                 usuario_id=contexto.usuario_id,
                 saldos_broker=saldo_real_dict,
                 usdt_broker=saldo_real_dict.get("USDT", 0.0),
+                session_factory=SessionLocal,
+                paper_initial_capital_usd=settings.INITIAL_CAPITAL_USD,
+                paper_fee_taker_bps_por_lado=costes_cuenta.get(
+                    "fee_taker_bps_por_lado"),
+                paper_order_book_provider=(
+                    None if settings.MODO_REAL else
+                    lambda symbol: obtener_order_book(
+                        binance, symbol, limit=20,
+                        medicion=medidor.operacion(
+                            "binance", "paper_order_book"),
+                    )
+                ),
                 estado_persistente=contexto.estado,
                 ultimos_movimientos=contexto.ultimos_movimientos,
                 ultimos_precios_venta=contexto.ultimos_precios_venta,
@@ -447,8 +463,8 @@ def trading_loop():
                 precios_actuales[symbol] = precio
 
                 # Cantidad, coste base y movimientos salen de la MISMA cartera
-                # activa. En PAPER, exclusivamente del Simulator; en LIVE,
-                # saldo broker + contexto persistente. El bucle no mezcla.
+                # activa. En PAPER, exclusivamente del ledger persistente;
+                # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.
                 posicion_llm = contexto_posicion_para_llm(cartera, symbol)
                 qty = posicion_llm.cantidad
                 position_detected = qty > 0
