@@ -97,8 +97,6 @@ class CarteraPaper:
                 initial_capital_usd=self._initial_capital_usd,
             )
             estado = estado_desde_db(db, ledger, dia=dia)
-            # Si el ledger acaba de crearse, el commit lo hace durable. Si ya
-            # existia, es un commit sin cambios economicos.
             db.commit()
             return estado
 
@@ -125,15 +123,11 @@ class CarteraPaper:
         return ContextoPosicionLLM(
             cantidad=float(posicion.cantidad) if posicion else 0.0,
             precio_medio=(float(posicion.coste_medio_neto) if posicion else None),
-            # El Simulator tenia un timestamp mutable en memoria. El journal ya
-            # conserva `creada_en`; mientras no se exponga un helper especifico
-            # no se inventa un valor equivalente.
             ultimo_movimiento=None,
             ultimo_precio_venta=ultimo_precio_venta,
         )
 
     def portafolio_para_llm(self):
-        """Snapshot PAPER reconstruido; nunca contiene balances del broker."""
         estado = self._estado()
         salida = []
         if estado.capital_usd > 0:
@@ -163,7 +157,6 @@ class CarteraPaper:
         )
 
     def limpiar_posiciones_sin_respaldo(self, saldos_broker=None) -> int:
-        """No-op: una posicion PAPER no necesita respaldo en el exchange."""
         return 0
 
     @staticmethod
@@ -190,16 +183,7 @@ class CarteraPaper:
             raise ValueError("profundidad PAPER no disponible")
         return book
 
-    def ejecutar(self, veredicto, precio, *, trader=None) -> ResultadoOrden:
-        """Simula un fill taker realista y lo persiste atomically.
-
-        BUY: `approved_quote_amount` es el tope TOTAL de capital. Se descuenta
-        primero el efecto de la fee para que notional+fee nunca lo supere.
-        SELL: se caminan bids por la cantidad base aprobada.
-
-        Si fee, profundidad, liquidez o persistencia son desconocidas, falla
-        cerrado y no aparece ninguna operacion en el journal.
-        """
+    def ejecutar(self, veredicto, precio, *, trader=None, economics=None) -> ResultadoOrden:
         symbol = veredicto.symbol
         lado = veredicto.side
         try:
@@ -253,8 +237,6 @@ class CarteraPaper:
             )
 
         if lado is Lado.COMPRA:
-            # Invariante economica: riesgo aprueba efectivo total, no solo
-            # notional. Nunca se permite que la fee lo empuje por encima.
             if fill.quote_neto is None or fill.quote_neto > aprobado + Decimal("1e-12"):
                 return error_pre_envio(
                     symbol,
@@ -270,12 +252,17 @@ class CarteraPaper:
                     usuario_id=self.usuario_id,
                     initial_capital_usd=self._initial_capital_usd,
                 )
+                economics = economics if isinstance(economics, dict) else {}
                 registrar_fill(
                     db,
                     ledger=ledger,
                     symbol=symbol,
                     reference_price=precio,
                     fill=fill,
+                    strategy=economics.get("strategy"),
+                    expected_edge_bps=economics.get("expected_edge_bps"),
+                    expected_cost_bps=economics.get("expected_cost_bps"),
+                    expected_net_bps=economics.get("expected_net_bps"),
                 )
                 db.commit()
         except Exception as exc:
@@ -294,8 +281,6 @@ class CarteraPaper:
             requested_base_quantity=requested_base,
             requested_quote_amount=requested_quote,
             executed_base_quantity=float(fill.base_ejecutada),
-            # Semantica compatible con cummulativeQuoteQty: notional bruto; la
-            # fee vive separada y el ledger usa quote_net para el efectivo.
             executed_quote_amount=float(fill.quote_bruto),
             average_fill_price=float(fill.precio_vwap),
             order_id=None,
@@ -303,8 +288,6 @@ class CarteraPaper:
 
 
 class CarteraLive:
-    """Cartera real: estado persistente + saldos y ejecucion del exchange."""
-
     modo = "LIVE"
     usa_broker = True
 
@@ -353,7 +336,7 @@ class CarteraLive:
     def limpiar_posiciones_sin_respaldo(self, saldos_broker=None) -> int:
         return 0
 
-    def ejecutar(self, veredicto, precio, *, trader) -> ResultadoOrden:
+    def ejecutar(self, veredicto, precio, *, trader, economics=None) -> ResultadoOrden:
         extra = ({"session_factory": self._session_factory}
                  if self._session_factory is not None else {})
         if veredicto.side is Lado.COMPRA:
@@ -391,7 +374,7 @@ def portafolio_para_llm(cartera):
 def construir_cartera(
     *,
     modo_real,
-    simulador=None,  # compatibilidad de llamada; PAPER ya no lo usa como estado
+    simulador=None,
     usuario_id=None,
     saldos_broker=None,
     usdt_broker=0.0,
@@ -403,7 +386,6 @@ def construir_cartera(
     paper_fee_taker_bps_por_lado=None,
     paper_order_book_provider=None,
 ):
-    """Unico punto donde se decide el modo; luego el bucle no vuelve a mezclar."""
     if modo_real:
         return CarteraLive(
             usuario_id=usuario_id,
