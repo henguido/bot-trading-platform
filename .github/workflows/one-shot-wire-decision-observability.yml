@@ -1,0 +1,303 @@
+name: one-shot-wire-decision-observability
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+          fetch-depth: 0
+
+      - name: Patch main.py with aggregate decision-cycle observability
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/main.py')
+          text = path.read_text(encoding='utf-8')
+
+          def once(text, old_lines, new_lines, label):
+              old = '\n'.join(old_lines)
+              new = '\n'.join(new_lines)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
+              return text.replace(old, new, 1)
+
+          text = once(text,
+              ['from backend.telemetria_http import MedidorCicloHttp, nuevo_ciclo_id',
+               'from contextlib import asynccontextmanager'],
+              ['from backend.telemetria_http import MedidorCicloHttp, nuevo_ciclo_id',
+               'from backend.observabilidad.ciclos import (',
+               '    ResumenCicloDecision, persistir_resumen_ciclo,',
+               ')',
+               'from contextlib import asynccontextmanager'],
+              'import observabilidad')
+
+          text = once(text,
+              ['        esperar_ciclo = False',
+               '        try:',
+               '            # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────'],
+              ['        esperar_ciclo = False',
+               '        resumen_decision_ciclo = None',
+               '        try:',
+               '            # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────'],
+              'initialize cycle summary')
+
+          text = once(text,
+              ['                esperar_ciclo = True',
+               '                continue',
+               '',
+               '            # ── RECONCILIACION antes de operar (P0-14) ───────────────────'],
+              ['                esperar_ciclo = True',
+               '                continue',
+               '',
+               '            resumen_decision_ciclo = ResumenCicloDecision(',
+               '                ciclo_id=medidor.ciclo_id,',
+               '                usuario_id=contexto.usuario_id,',
+               '                modo="LIVE" if settings.MODO_REAL else "PAPER",',
+               '                decision_engine=settings.DECISION_ENGINE,',
+               '            )',
+               '',
+               '            # ── RECONCILIACION antes de operar (P0-14) ───────────────────'],
+              'construct cycle summary')
+
+          text = once(text,
+              ['            except Exception as e:',
+               '                print(f"❌ Error al inicializar Binance o traer datos: {e}")',
+               '                esperar_ciclo = True'],
+              ['            except Exception as e:',
+               '                print(f"❌ Error al inicializar Binance o traer datos: {e}")',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_omision("DATOS_BINANCE_NO_DISPONIBLES")',
+               '                esperar_ciclo = True'],
+              'binance init omission')
+
+          text = once(text,
+              ['            if not assets_disponibles:',
+               '                print("⚠️ No se encontraron activos disponibles.")',
+               '                esperar_ciclo = True'],
+              ['            if not assets_disponibles:',
+               '                print("⚠️ No se encontraron activos disponibles.")',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_omision("SIN_ACTIVOS_DISPONIBLES")',
+               '                esperar_ciclo = True'],
+              'no assets omission')
+
+          text = once(text,
+              ['            if not activos_evaluar:',
+               '                print("⌛ Esperando el siguiente ciclo válido...")',
+               '                esperar_ciclo = True'],
+              ['            if not activos_evaluar:',
+               '                print("⌛ Esperando el siguiente ciclo válido...")',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_omision("FUERA_DE_CADENCIA")',
+               '                esperar_ciclo = True'],
+              'cadence omission')
+
+          text = once(text,
+              ['            print(gate.linea(int((time.perf_counter() - inicio_gate) * 1000)))',
+               '',
+               '            # ── SCANNER DETERMINISTICO (Fase BOT 2.0-03B) ────────────────────'],
+              ['            print(gate.linea(int((time.perf_counter() - inicio_gate) * 1000)))',
+               '            if resumen_decision_ciclo is not None:',
+               '                resumen_decision_ciclo.anotar_elegibilidad(gate)',
+               '',
+               '            # ── SCANNER DETERMINISTICO (Fase BOT 2.0-03B) ────────────────────'],
+              'eligibility summary')
+
+          text = once(text,
+              ['            print(resumen_scanner.linea(',
+               '                int((time.perf_counter() - inicio_scanner) * 1000), requests=0))',
+               '',
+               '            # Contrato 05E ya cableado, pero congelado en False hasta que'],
+              ['            print(resumen_scanner.linea(',
+               '                int((time.perf_counter() - inicio_scanner) * 1000), requests=0))',
+               '            if resumen_decision_ciclo is not None:',
+               '                resumen_decision_ciclo.anotar_scanner(resumen_scanner)',
+               '',
+               '            # Contrato 05E ya cableado, pero congelado en False hasta que'],
+              'scanner summary')
+
+          text = once(text,
+              ['            pre_llm_05e = aplicar_pre_llm_05e(',
+               '                activos_para_gpt,'],
+              ['            n_antes_05e = len(activos_para_gpt)',
+               '            pre_llm_05e = aplicar_pre_llm_05e(',
+               '                activos_para_gpt,'],
+              'pre 05e count')
+
+          text = once(text,
+              ['            evaluaciones_rentabilidad_05e = pre_llm_05e.evaluaciones',
+               '            if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:'],
+              ['            evaluaciones_rentabilidad_05e = pre_llm_05e.evaluaciones',
+               '            if resumen_decision_ciclo is not None:',
+               '                resumen_decision_ciclo.anotar_rentabilidad_pre(',
+               '                    antes=n_antes_05e,',
+               '                    despues=len(activos_para_gpt),',
+               '                    aplicado=pre_llm_05e.aplicado,',
+               '                    motivo=pre_llm_05e.motivo,',
+               '                )',
+               '            if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:'],
+              '05e pre summary')
+
+          text = once(text,
+              ['            if not activos_para_gpt:',
+               '                print("⚠️ No hay activos para analizar con GPT")',
+               '                esperar_ciclo = True'],
+              ['            if not activos_para_gpt:',
+               '                print("⚠️ No hay activos para analizar con GPT")',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_omision("SIN_CANDIDATOS_MOTOR")',
+               '                esperar_ciclo = True'],
+              'no engine candidates')
+
+          text = once(text,
+              ['            if not resultados:',
+               '                print("⚠️ GPT no devolvió JSON válido. Respuesta completa:")'],
+              ['            if not resultados:',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_omision("MOTOR_SIN_RESULTADOS")',
+               '                print("⚠️ GPT no devolvió JSON válido. Respuesta completa:")'],
+              'no engine results')
+
+          text = once(text,
+              ['                decision = resultado.get("decision", "ESPERAR")',
+               '                # GPT devuelve la cantidad en ACTIVO BASE (BTC en BTCUSDT).'],
+              ['                decision = resultado.get("decision", "ESPERAR")',
+               '                if resumen_decision_ciclo is not None:',
+               '                    resumen_decision_ciclo.anotar_decision(decision)',
+               '                # GPT devuelve la cantidad en ACTIVO BASE (BTC en BTCUSDT).'],
+              'engine decision')
+
+          text = once(text,
+              ['                if not symbol:',
+               '                    continue'],
+              ['                if not symbol:',
+               '                    if resumen_decision_ciclo is not None:',
+               '                        resumen_decision_ciclo.anotar_omision("RESULTADO_SIN_SYMBOL")',
+               '                    continue'],
+              'missing symbol')
+
+          text = once(text,
+              ['                if precio_actual is None:',
+               '                    print(f"⚠️ Precio no disponible para {symbol}. Se omite.")',
+               '                    continue'],
+              ['                if precio_actual is None:',
+               '                    print(f"⚠️ Precio no disponible para {symbol}. Se omite.")',
+               '                    if resumen_decision_ciclo is not None:',
+               '                        resumen_decision_ciclo.anotar_omision("PRECIO_NO_DISPONIBLE")',
+               '                    continue'],
+              'missing price')
+
+          text = once(text,
+              ['                        if not permitida_05e:',
+               '                            print(f"[RENTABILIDAD-05E] {symbol} bloqueada: {motivo_05e}")',
+               '                            continue'],
+              ['                        if not permitida_05e:',
+               '                            print(f"[RENTABILIDAD-05E] {symbol} bloqueada: {motivo_05e}")',
+               '                            if resumen_decision_ciclo is not None:',
+               '                                resumen_decision_ciclo.anotar_rentabilidad_post_bloqueada(motivo_05e)',
+               '                            continue'],
+              '05e post block')
+
+          text = once(text,
+              ['                    veredicto = motor_riesgo.evaluar(',
+               '                        propuesta,',
+               '                        capital_disponible=cartera.capital_disponible(),',
+               '                        estado=estado_riesgo,',
+               '                    )',
+               '',
+               '                    if not veredicto.aprobado:'],
+              ['                    veredicto = motor_riesgo.evaluar(',
+               '                        propuesta,',
+               '                        capital_disponible=cartera.capital_disponible(),',
+               '                        estado=estado_riesgo,',
+               '                    )',
+               '                    if resumen_decision_ciclo is not None:',
+               '                        resumen_decision_ciclo.anotar_riesgo(veredicto)',
+               '',
+               '                    if not veredicto.aprobado:'],
+              'risk verdict')
+
+          text = once(text,
+              ['                    ejecucion = cartera.ejecutar(veredicto, precio_actual,',
+               '                                                 trader=real_trader)',
+               '                    if not ejecucion.success:'],
+              ['                    ejecucion = cartera.ejecutar(veredicto, precio_actual,',
+               '                                                 trader=real_trader)',
+               '                    if resumen_decision_ciclo is not None:',
+               '                        resumen_decision_ciclo.anotar_ejecucion(',
+               '                            success=bool(ejecucion.success),',
+               '                            motivo=None if ejecucion.success else type(ejecucion).__name__,',
+               '                        )',
+               '                    if not ejecucion.success:'],
+              'execution outcome')
+
+          text = once(text,
+              ['                    if cartera.cantidad_disponible(symbol) <= 0:',
+               '                        print(f"⛔ ESPERAR ignorado: no hay posicion en {symbol} "',
+               '                              f"segun la cartera {cartera.modo}")',
+               '                        continue'],
+              ['                    if cartera.cantidad_disponible(symbol) <= 0:',
+               '                        print(f"⛔ ESPERAR ignorado: no hay posicion en {symbol} "',
+               '                              f"segun la cartera {cartera.modo}")',
+               '                        if resumen_decision_ciclo is not None:',
+               '                            resumen_decision_ciclo.anotar_omision("ESPERAR_SIN_POSICION")',
+               '                        continue'],
+              'wait without position')
+
+          text = once(text,
+              ['        except Exception as e:',
+               '            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses: se',
+               '            # sigue informando de la clase, el mensaje y el traceback completo.'],
+              ['        except Exception as e:',
+               '            if resumen_decision_ciclo is not None:',
+               '                resumen_decision_ciclo.anotar_omision(f"ERROR_CICLO:{type(e).__name__}")',
+               '            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses: se',
+               '            # sigue informando de la clase, el mensaje y el traceback completo.'],
+              'cycle exception')
+
+          text = once(text,
+              ['            medidor.volcar()',
+               '',
+               '            # La espera va DESPUES del volcado. No se espera si estamos saliendo'],
+              ['            medidor.volcar()',
+               '',
+               '            # La observabilidad de decisiones es audit-only. Un fallo al',
+               '            # persistirla nunca puede cambiar el resultado ni matar el ciclo.',
+               '            if resumen_decision_ciclo is not None:',
+               '                try:',
+               '                    with SessionLocal() as db:',
+               '                        persistir_resumen_ciclo(db, resumen_decision_ciclo)',
+               '                except Exception as e:',
+               '                    imprimir_resistente(',
+               '                        f"[OBSERVABILIDAD] no se pudo persistir ciclo: "',
+               '                        f"{type(e).__name__}: {e}")',
+               '',
+               '            # La espera va DESPUES del volcado. No se espera si estamos saliendo'],
+              'persist cycle summary')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patched main and remove helper
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/one-shot-wire-decision-observability.yml
+          git add backend/main.py
+          git commit -m "feat(observabilidad): cablea embudo al ciclo de trading"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
