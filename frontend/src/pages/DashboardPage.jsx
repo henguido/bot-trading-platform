@@ -7,6 +7,7 @@ function DashboardPage() {
   const navigate = useNavigate();
   const [balanceUSDT, setBalanceUSDT] = useState("Cargando...");
   const [balances, setBalances] = useState([]);
+  const [estrategias, setEstrategias] = useState([]);
   const [totalUSD, setTotalUSD] = useState("Cargando...");
   const [errorMsg, setErrorMsg] = useState("");
   const [meta, setMeta] = useState({
@@ -46,6 +47,14 @@ function DashboardPage() {
           pnl_status: b.pnl_status,
           pnl_metodologia: b.pnl_metodologia,
         })));
+        const porEstrategia = data.estrategias_paper?.estrategias;
+        const filasEstrategia = porEstrategia && typeof porEstrategia === "object"
+          ? Object.entries(porEstrategia).map(([nombre, fila]) => ({
+              nombre,
+              ...fila,
+            })).sort((a, b) => Number(b.pnl_realizado_neto_usd || 0) - Number(a.pnl_realizado_neto_usd || 0))
+          : [];
+        setEstrategias(filasEstrategia);
         setTotalUSD(data.valor_total_usd);
         setMeta({
           modo: data.modo || "",
@@ -66,6 +75,7 @@ function DashboardPage() {
         }
         setBalanceUSDT("Error");
         setTotalUSD("Error");
+        setEstrategias([]);
         setErrorMsg(err.message || "No se pudo cargar el resumen");
       });
   }, [navigate]);
@@ -81,9 +91,19 @@ function DashboardPage() {
     return Number(valor).toFixed(2);
   };
 
+  const bps = (valor) => {
+    if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return "—";
+    return `${Number(valor).toFixed(1)} bps`;
+  };
+
+  const porcentaje = (valor) => {
+    if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return "—";
+    return `${(Number(valor) * 100).toFixed(1)}%`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center p-4">
-      <div className="bg-white shadow-xl rounded-xl p-8 w-full max-w-5xl text-center animate-fade-in">
+      <div className="bg-white shadow-xl rounded-xl p-8 w-full max-w-6xl text-center animate-fade-in">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h1 className="text-3xl font-bold text-gray-800">
             👋 Bienvenido a BOT Trading Platform
@@ -156,6 +176,57 @@ function DashboardPage() {
               <p className="text-xs text-gray-500">Posiciones abiertas</p>
               <p className="font-semibold text-gray-800">{meta.posiciones}</p>
             </div>
+          </div>
+        )}
+
+        {meta.modo === "PAPER" && estrategias.length > 0 && (
+          <div className="mb-6 text-left">
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-2">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-800">Rendimiento por estrategia</h2>
+                <p className="text-xs text-gray-500">
+                  Atribución FIFO por estrategia de entrada; P&L realizado neto de fees ejecutadas.
+                </p>
+              </div>
+              <span className="text-xs text-gray-400">Desconocido nunca se interpreta como 0</span>
+            </div>
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="min-w-full bg-white text-sm">
+                <thead>
+                  <tr className="bg-gray-100 text-gray-700">
+                    <th className="px-3 py-2 text-left">Estrategia</th>
+                    <th className="px-3 py-2 text-right">Cierres</th>
+                    <th className="px-3 py-2 text-right">P&L neto</th>
+                    <th className="px-3 py-2 text-right">Retorno realizado</th>
+                    <th className="px-3 py-2 text-right">Neto esperado</th>
+                    <th className="px-3 py-2 text-right">Error vs esperado</th>
+                    <th className="px-3 py-2 text-right">Tasa positiva</th>
+                    <th className="px-3 py-2 text-right">Coste aún abierto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {estrategias.map((e) => (
+                    <tr key={e.nombre} className="border-t hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800">{e.nombre}</td>
+                      <td className="px-3 py-2 text-right">{e.cierres ?? 0}</td>
+                      <td className={`px-3 py-2 text-right font-semibold ${
+                        Number(e.pnl_realizado_neto_usd) >= 0 ? "text-green-700" : "text-red-700"
+                      }`}>
+                        ${usd(e.pnl_realizado_neto_usd)}
+                      </td>
+                      <td className="px-3 py-2 text-right">{bps(e.retorno_realizado_neto_bps)}</td>
+                      <td className="px-3 py-2 text-right">{bps(e.expected_net_bps_ponderado)}</td>
+                      <td className="px-3 py-2 text-right">{bps(e.error_expected_vs_realizado_bps)}</td>
+                      <td className="px-3 py-2 text-right">{porcentaje(e.positive_rate)}</td>
+                      <td className="px-3 py-2 text-right">${usd(e.coste_abierto_usd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Las posiciones abiertas no cuentan como beneficio realizado. El retorno de una estrategia se actualiza cuando existen ventas que cierran sus lotes de entrada.
+            </p>
           </div>
         )}
 
