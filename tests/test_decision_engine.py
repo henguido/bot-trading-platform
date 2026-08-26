@@ -100,6 +100,73 @@ def test_contexto_economico_rechaza_numeros_invalidos(campo, valor):
         de.contexto_economico_de({"strategy": "TEST", campo: valor})
 
 
+def test_contexto_para_ejecucion_gpt_es_vacio_aunque_intenten_reinyectar_economia():
+    contexto, diagnostico = de.contexto_economico_para_ejecucion(
+        de.ENGINE_GPT,
+        {
+            "strategy": "NO_CONFIABLE",
+            "expected_edge_bps": 9000,
+            "expected_cost_bps": 0,
+            "expected_net_bps": 9000,
+        },
+    )
+
+    assert contexto == {}
+    assert diagnostico is None
+
+
+def test_contexto_para_ejecucion_motor_no_registrado_no_es_confiable():
+    contexto, diagnostico = de.contexto_economico_para_ejecucion(
+        "MOTOR_FUTURO_NO_REGISTRADO",
+        {"strategy": "X", "expected_net_bps": 12.0},
+    )
+
+    assert contexto == {}
+    assert diagnostico == "MOTOR_ECONOMICO_NO_CONFIABLE"
+
+
+def test_contexto_para_ejecucion_telemetria_invalida_no_lanza():
+    # Simula un motor determinista futuro ya registrado sin tener que cambiar
+    # la configuracion productiva de motores en este bloque.
+    original = de.ENGINES_VALIDOS
+    try:
+        de.ENGINES_VALIDOS = original + ("DETERMINISTA_TEST",)
+        contexto, diagnostico = de.contexto_economico_para_ejecucion(
+            "DETERMINISTA_TEST",
+            {"strategy": "TEST", "expected_net_bps": float("nan")},
+        )
+    finally:
+        de.ENGINES_VALIDOS = original
+
+    assert contexto == {}
+    assert diagnostico.startswith("ECONOMIA_INVALIDA:")
+
+
+def test_contexto_para_ejecucion_motor_determinista_registrado_normaliza():
+    original = de.ENGINES_VALIDOS
+    try:
+        de.ENGINES_VALIDOS = original + ("DETERMINISTA_TEST",)
+        contexto, diagnostico = de.contexto_economico_para_ejecucion(
+            "DETERMINISTA_TEST",
+            {
+                "strategy": "  MOMENTUM_OOS  ",
+                "expected_edge_bps": "44.5",
+                "expected_cost_bps": 17,
+                "expected_net_bps": 27.5,
+            },
+        )
+    finally:
+        de.ENGINES_VALIDOS = original
+
+    assert diagnostico is None
+    assert contexto == {
+        "strategy": "MOMENTUM_OOS",
+        "expected_edge_bps": 44.5,
+        "expected_cost_bps": 17.0,
+        "expected_net_bps": 27.5,
+    }
+
+
 def test_safe_no_trade_no_llama_ia_y_solo_devuelve_esperar():
     resultados, explicacion = de.decidir(
         de.ENGINE_SAFE_NO_TRADE,
