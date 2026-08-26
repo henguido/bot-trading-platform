@@ -179,6 +179,12 @@ function DashboardPage() {
               </StatusPill>
             )}
             <button
+              onClick={() => navigate("/observabilidad")}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300"
+            >
+              Observabilidad
+            </button>
+            <button
               onClick={() => navigate("/historial")}
               className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/10"
             >
