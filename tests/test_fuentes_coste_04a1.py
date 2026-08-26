@@ -206,11 +206,33 @@ def test_order_book_es_una_sola_peticion_on_demand():
     assert op.metricas.n_elementos == 2
 
 
-def test_profundidad_no_esta_conectada_al_loop_ni_al_scanner():
+def test_profundidad_no_barre_universo_ni_scanner_y_paper_la_difiere():
     main = MAIN.read_text(encoding="utf-8")
     scanner = (RAIZ / "backend" / "scanner.py").read_text(encoding="utf-8")
-    assert "obtener_order_book" not in main
+    carteras = (RAIZ / "backend" / "portafolio" / "carteras.py").read_text(
+        encoding="utf-8"
+    )
+
+    # El scanner determinista continúa sin hacer ninguna petición de profundidad.
     assert "obtener_order_book" not in scanner
+
+    # Elegibilidad y barrido del universo siguen sin N+1 de order book.
+    bloque_universo = main.split("for asset in activos_evaluar:", 1)[1].split(
+        "print(gate.linea", 1
+    )[0]
+    assert "obtener_order_book" not in bloque_universo
+
+    bloque_scanner = main.split("# ── SCANNER DETERMINISTICO", 1)[1].split(
+        "if not activos_para_gpt:", 1
+    )[0]
+    assert "obtener_order_book" not in bloque_scanner
+
+    # PAPER recibe un proveedor diferido; el book solo se pide dentro de
+    # ejecutar(), después de que el MotorRiesgo haya aprobado la operación.
+    assert "paper_order_book_provider" in main
+    assert "lambda symbol: obtener_order_book" in main
+    assert "book = self._obtener_book(symbol)" in carteras
+    assert "book = self._order_book_provider(symbol)" in carteras
 
 
 # ── Asignación del coste IA ─────────────────────────────────────────────────
