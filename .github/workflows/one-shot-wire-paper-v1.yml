@@ -1,0 +1,129 @@
+name: one-shot-wire-paper-v1
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+    paths:
+      - .github/workflows/one-shot-wire-paper-v1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+      - name: Wire persistent PAPER dependencies into main
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/main.py')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {n}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'from backend import scanner\n',
+              'from backend import scanner\nfrom backend.economia.profundidad import obtener_order_book\n',
+              'import profundidad',
+          )
+
+          old_assets = '''            try:
+                assets_disponibles, balances_reales, symbols_info = get_available_assets(
+                    medidor=medidor)
+            except Exception as e:
+'''
+          new_assets = '''            try:
+                # Reutiliza el MISMO GET /account que ya obtiene balances para
+                # extraer la fee taker. No añade una peticion al ciclo.
+                resultado_assets = get_available_assets(
+                    medidor=medidor, incluir_costes_cuenta=True)
+                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets
+            except TypeError as e:
+                # Compatibilidad exclusivamente con adaptadores/dobles antiguos
+                # que conservan la firma historica de tres elementos. Produccion
+                # usa siempre la firma con costes; desconocido nunca se vuelve 0.
+                if "incluir_costes_cuenta" not in str(e):
+                    raise
+                assets_disponibles, balances_reales, symbols_info = get_available_assets(
+                    medidor=medidor)
+                costes_cuenta = {
+                    "fee_taker_bps_por_lado": None,
+                    "fee_maker_bps_por_lado": None,
+                    "fuente_fee": "NO_DISPONIBLE",
+                    "fuente_fee_maker": "NO_DISPONIBLE",
+                }
+            except Exception as e:
+'''
+          replace_once(old_assets, new_assets, 'assets con costes')
+
+          old_cartera = '''            cartera = construir_cartera(
+                modo_real=settings.MODO_REAL,
+                simulador=simulator,
+                usuario_id=contexto.usuario_id,
+                saldos_broker=saldo_real_dict,
+                usdt_broker=saldo_real_dict.get("USDT", 0.0),
+                estado_persistente=contexto.estado,
+                ultimos_movimientos=contexto.ultimos_movimientos,
+                ultimos_precios_venta=contexto.ultimos_precios_venta,
+            )
+'''
+          new_cartera = '''            cartera = construir_cartera(
+                modo_real=settings.MODO_REAL,
+                simulador=simulator,
+                usuario_id=contexto.usuario_id,
+                saldos_broker=saldo_real_dict,
+                usdt_broker=saldo_real_dict.get("USDT", 0.0),
+                session_factory=SessionLocal,
+                estado_persistente=contexto.estado,
+                ultimos_movimientos=contexto.ultimos_movimientos,
+                ultimos_precios_venta=contexto.ultimos_precios_venta,
+                paper_initial_capital_usd=settings.INITIAL_CAPITAL_USD,
+                paper_fee_taker_bps_por_lado=costes_cuenta.get(
+                    "fee_taker_bps_por_lado"),
+                paper_order_book_provider=(
+                    None if settings.MODO_REAL else
+                    lambda symbol: obtener_order_book(
+                        binance,
+                        symbol,
+                        limit=20,
+                        medicion=medidor.operacion("binance", "paper_order_book"),
+                    )
+                ),
+            )
+'''
+          replace_once(old_cartera, new_cartera, 'construccion cartera')
+
+          replace_once(
+              '''                # activa. En PAPER, exclusivamente del Simulator; en LIVE,
+                # saldo broker + contexto persistente. El bucle no mezcla.
+''',
+              '''                # activa. En PAPER, exclusivamente del ledger persistente;
+                # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.
+''',
+              'comentario fuente PAPER',
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Self-remove helper and commit exact patch
+        shell: bash
+        run: |
+          rm .github/workflows/one-shot-wire-paper-v1.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/main.py .github/workflows/one-shot-wire-paper-v1.yml
+          git diff --cached --check
+          git commit -m "feat(paper): cablea fee y profundidad al ciclo"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
