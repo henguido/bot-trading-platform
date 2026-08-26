@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { login } from "../services/api";
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -9,7 +10,6 @@ function LoginPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Redirigir si ya hay token
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (token) {
@@ -23,20 +23,9 @@ function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || "Error al iniciar sesión");
-      }
-
-      const data = await response.json();
+      const data = await login(email, password);
       localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user_name", data.nombre);  // ✅ Guarda el nombre
+      localStorage.setItem("user_name", data.nombre);
       navigate("/dashboard");
     } catch (err) {
       setErrorMsg(err.message || "Ocurrió un error");
