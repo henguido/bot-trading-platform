@@ -1,22 +1,31 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { getHistorial } from "../services/api";
 
 function HistorialPage() {
+  const navigate = useNavigate();
   const [historial, setHistorial] = useState([]);
   const [error, setError] = useState("");
   const [expandedIndex, setExpandedIndex] = useState(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/historial")
-      .then((res) => res.json())
+    getHistorial()
       .then((data) => {
         if (Array.isArray(data)) {
           setHistorial(data);
+          setError("");
         } else {
           setError("Error al obtener historial");
         }
       })
-      .catch(() => setError("Error de conexión con el backend"));
-  }, []);
+      .catch((err) => {
+        if (err.status === 401) {
+          navigate("/login");
+          return;
+        }
+        setError(err.message || "Error de conexión con el backend");
+      });
+  }, [navigate]);
 
   const toggleExpand = (index) => {
     setExpandedIndex(index === expandedIndex ? null : index);
