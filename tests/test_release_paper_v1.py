@@ -1,6 +1,8 @@
 """Smoke de release PAPER v1: configuracion + ledger + endpoints reales."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -56,11 +58,9 @@ def test_defaults_release_paper_v1_son_500_usdt_y_2_por_ciento():
 
 
 def test_cors_de_main_sale_de_settings_y_no_esta_hardcodeado():
-    fuente = (main.Path(__file__).resolve().parents[1] / "backend" / "main.py") \
-        if hasattr(main, "Path") else None
     # No dependemos de internals de Starlette; el contrato de codigo es que la
     # lista autorizada venga de la fuente canonica settings.
-    texto = __import__("pathlib").Path(main.__file__).read_text(encoding="utf-8")
+    texto = Path(main.__file__).read_text(encoding="utf-8")
     assert "allow_origins=list(settings.CORS_ORIGINS)" in texto
     assert 'allow_origins=["http://localhost:5173"]' not in texto
     assert settings.CORS_ORIGINS
