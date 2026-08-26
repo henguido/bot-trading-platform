@@ -1,3 +1,4 @@
+from backend.config import settings
 from backend.simulation.estado_operativo import construir_estado_operativo
 from backend.simulation.paper_ledger import EstadoPaper, PosicionPaper
 
@@ -39,6 +40,16 @@ def test_estado_operativo_deriva_capital_motor_y_evidencia_sin_red():
     assert salida["evidencia_estrategias_status"] == "DISPONIBLE"
     assert salida["paper_execution_model"] == "ORDER_BOOK_VWAP_TAKER_FEE"
     assert salida["paper_ledger_source"] == "PAPER_OPERACIONES"
+
+    limites = salida["limites_riesgo"]
+    assert limites["asignacion_maxima_por_operacion_pct"] == (
+        settings.LIMITE_ASIGNACION_POR_OPERACION * 100.0
+    )
+    assert limites["monto_maximo_por_operacion_usd"] == settings.MONTO_MAXIMO_USDT
+    assert limites["perdida_realizada_diaria_maxima_usd"] == settings.MAX_DAILY_LOSS_USDT
+    assert limites["exposicion_total_maxima_usd"] == settings.MAX_EXPOSICION_TOTAL_USDT
+    assert limites["exposicion_por_activo_maxima_usd"] == settings.MAX_EXPOSICION_POR_ACTIVO_USDT
+    assert limites["timezone_dia_riesgo"] == settings.RISK_TIMEZONE
 
 
 def test_estado_operativo_declara_incertidumbre_y_no_inventa_evidencia():
