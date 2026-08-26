@@ -34,56 +34,53 @@ jobs:
               text = text.replace(old, new, 1)
 
           anchor = '# Lógica principal del bot\ndef trading_loop():\n'
-          helper = '''def _obtener_assets_con_costes(*, medidor=None):
-              """Normaliza la transición 3->4 valores sin inventar costes.
-
-              Producción soporta ``incluir_costes_cuenta=True`` y obtiene la fee
-              del mismo GET /account usado para balances. Dobles/adaptadores legacy
-              pueden seguir devolviendo tres valores; en ese caso la fee queda
-              explícitamente desconocida y PAPER falla cerrado si intentara operar.
-              """
-              try:
-                  resultado = get_available_assets(
-                      medidor=medidor, incluir_costes_cuenta=True)
-              except TypeError as e:
-                  if "incluir_costes_cuenta" not in str(e):
-                      raise
-                  resultado = get_available_assets(medidor=medidor)
-
-              if len(resultado) == 4:
-                  return resultado
-              if len(resultado) == 3:
-                  assets, balances, symbols_info = resultado
-                  return assets, balances, symbols_info, {
-                      "fee_taker_bps_por_lado": None,
-                      "fee_maker_bps_por_lado": None,
-                      "fuente_fee": "NO_DISPONIBLE",
-                      "fuente_fee_maker": "NO_DISPONIBLE",
-                  }
-              raise ValueError(
-                  f"get_available_assets devolvio {len(resultado)} elementos; se esperaban 3 o 4"
-              )
-
-
-# Lógica principal del bot
-def trading_loop():
-'''
+          helper_lines = [
+              'def _obtener_assets_con_costes(*, medidor=None):',
+              '    """Normaliza 3/4 valores sin inventar costes."""',
+              '    try:',
+              '        resultado = get_available_assets(',
+              '            medidor=medidor, incluir_costes_cuenta=True)',
+              '    except TypeError as e:',
+              '        if "incluir_costes_cuenta" not in str(e):',
+              '            raise',
+              '        resultado = get_available_assets(medidor=medidor)',
+              '',
+              '    if len(resultado) == 4:',
+              '        return resultado',
+              '    if len(resultado) == 3:',
+              '        assets, balances, symbols_info = resultado',
+              '        return assets, balances, symbols_info, {',
+              '            "fee_taker_bps_por_lado": None,',
+              '            "fee_maker_bps_por_lado": None,',
+              '            "fuente_fee": "NO_DISPONIBLE",',
+              '            "fuente_fee_maker": "NO_DISPONIBLE",',
+              '        }',
+              '    raise ValueError(',
+              '        f"get_available_assets devolvio {len(resultado)} elementos; "',
+              '        "se esperaban 3 o 4")',
+              '',
+              '',
+              '# Lógica principal del bot',
+              'def trading_loop():',
+              '',
+          ]
+          helper = '\n'.join(helper_lines)
           replace_once(anchor, helper, 'insercion adaptador')
 
-          old = (
-              '                # Reutiliza el MISMO GET /account que ya obtiene balances para\n'
-              '                # extraer la fee taker. No añade una peticion al ciclo.\n'
-              '                resultado_assets = get_available_assets(\n'
-              '                    medidor=medidor, incluir_costes_cuenta=True)\n'
-              '                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets'
-          )
-          new = (
-              '                # Reutiliza el MISMO GET /account que ya obtiene balances.\n'
-              '                # El adaptador conserva dobles legacy sin convertir desconocido en cero.\n'
-              '                (assets_disponibles, balances_reales, symbols_info,\n'
-              '                 costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)'
-          )
-          replace_once(old, new, 'uso adaptador')
+          old_lines = [
+              '                # Reutiliza el MISMO GET /account que ya obtiene balances para',
+              '                # extraer la fee taker. No añade una peticion al ciclo.',
+              '                resultado_assets = get_available_assets(',
+              '                    medidor=medidor, incluir_costes_cuenta=True)',
+              '                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets',
+          ]
+          new_lines = [
+              '                # Reutiliza el MISMO GET /account que ya obtiene balances.',
+              '                # Los adaptadores legacy conservan fee desconocida, nunca cero.',
+              '                (assets_disponibles, balances_reales, symbols_info,',
+              '                 costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)',
+          ]
+          replace_once('\n'.join(old_lines), '\n'.join(new_lines), 'uso adaptador')
 
           path.write_text(text, encoding='utf-8')
           PY
