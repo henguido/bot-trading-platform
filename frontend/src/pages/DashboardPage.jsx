@@ -9,6 +9,16 @@ function DashboardPage() {
   const [balances, setBalances] = useState([]);
   const [totalUSD, setTotalUSD] = useState("Cargando...");
   const [errorMsg, setErrorMsg] = useState("");
+  const [meta, setMeta] = useState({
+    modo: "",
+    pnlRealizado: null,
+    pnlTotal: null,
+    pnlTotalStatus: "NO_DISPONIBLE",
+    pnlTotalNetoLiquidacion: false,
+    fees: null,
+    operaciones: 0,
+    posiciones: 0,
+  });
 
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
@@ -34,8 +44,19 @@ function DashboardPage() {
           average_price_status: b.average_price_status,
           pnl: b.pnl,
           pnl_status: b.pnl_status,
+          pnl_metodologia: b.pnl_metodologia,
         })));
         setTotalUSD(data.valor_total_usd);
+        setMeta({
+          modo: data.modo || "",
+          pnlRealizado: data.pnl_realizado_usd ?? null,
+          pnlTotal: data.pnl_total ?? null,
+          pnlTotalStatus: data.pnl_total_status || "NO_DISPONIBLE",
+          pnlTotalNetoLiquidacion: Boolean(data.pnl_total_es_neto_liquidacion),
+          fees: data.fees_total_usd ?? null,
+          operaciones: data.operaciones ?? 0,
+          posiciones: data.posiciones_abiertas ?? 0,
+        });
         setErrorMsg("");
       })
       .catch((err) => {
@@ -55,12 +76,28 @@ function DashboardPage() {
     navigate("/login");
   };
 
+  const usd = (valor) => {
+    if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return "—";
+    return Number(valor).toFixed(2);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center p-4">
-      <div className="bg-white shadow-xl rounded-xl p-8 w-full max-w-3xl text-center animate-fade-in">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">
-          👋 Bienvenido a BOT Trading Platform
-        </h1>
+      <div className="bg-white shadow-xl rounded-xl p-8 w-full max-w-5xl text-center animate-fade-in">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <h1 className="text-3xl font-bold text-gray-800">
+            👋 Bienvenido a BOT Trading Platform
+          </h1>
+          {meta.modo && (
+            <span className={`self-center px-3 py-1 rounded-full text-xs font-bold tracking-wide ${
+              meta.modo === "PAPER"
+                ? "bg-amber-100 text-amber-800 border border-amber-300"
+                : "bg-red-100 text-red-800 border border-red-300"
+            }`}>
+              MODO {meta.modo}
+            </span>
+          )}
+        </div>
 
         {localStorage.getItem("user_name") && (
           <p className="text-gray-700 text-lg mb-4">
@@ -74,7 +111,7 @@ function DashboardPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left mb-4">
           <div>
             <p className="text-gray-700 font-medium mb-1">💰 Saldo USDT disponible:</p>
             <div className="bg-green-100 text-green-800 font-semibold p-2 rounded">
@@ -84,10 +121,43 @@ function DashboardPage() {
           <div>
             <p className="text-gray-700 font-medium mb-1">💵 Total estimado en USD:</p>
             <div className="bg-blue-100 text-blue-800 font-semibold p-2 rounded">
-              {totalUSD}
+              {totalUSD === null ? "No disponible" : totalUSD}
             </div>
           </div>
         </div>
+
+        {meta.modo === "PAPER" && (
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-left mb-6">
+            <div className="border border-gray-200 rounded-lg p-3">
+              <p className="text-xs text-gray-500">P&L realizado</p>
+              <p className={`font-semibold ${Number(meta.pnlRealizado) >= 0 ? "text-green-700" : "text-red-700"}`}>
+                ${usd(meta.pnlRealizado)}
+              </p>
+              <p className="text-[11px] text-gray-400">Neto de fees ejecutadas</p>
+            </div>
+            <div className="border border-gray-200 rounded-lg p-3">
+              <p className="text-xs text-gray-500">P&L total mostrado</p>
+              <p className={`font-semibold ${Number(meta.pnlTotal) >= 0 ? "text-green-700" : "text-red-700"}`}>
+                {meta.pnlTotalStatus === "DISPONIBLE" ? `$${usd(meta.pnlTotal)}` : "—"}
+              </p>
+              <p className="text-[11px] text-gray-400">
+                {meta.pnlTotalNetoLiquidacion ? "Neto realizado" : "Incluye MTM pre-salida"}
+              </p>
+            </div>
+            <div className="border border-gray-200 rounded-lg p-3">
+              <p className="text-xs text-gray-500">Fees acumuladas</p>
+              <p className="font-semibold text-gray-800">${usd(meta.fees)}</p>
+            </div>
+            <div className="border border-gray-200 rounded-lg p-3">
+              <p className="text-xs text-gray-500">Operaciones</p>
+              <p className="font-semibold text-gray-800">{meta.operaciones}</p>
+            </div>
+            <div className="border border-gray-200 rounded-lg p-3">
+              <p className="text-xs text-gray-500">Posiciones abiertas</p>
+              <p className="font-semibold text-gray-800">{meta.posiciones}</p>
+            </div>
+          </div>
+        )}
 
         {balances.length > 0 && (
           <>
@@ -103,7 +173,9 @@ function DashboardPage() {
                       <th className="px-4 py-2">Precio USDT</th>
                       <th className="px-4 py-2">Valor USD</th>
                       <th className="px-4 py-2">Precio Promedio</th>
-                      <th className="px-4 py-2">Ganancia/Pérdida</th>
+                      <th className="px-4 py-2">
+                        {meta.modo === "PAPER" ? "P&L abierto*" : "Ganancia/Pérdida"}
+                      </th>
                       <th className="px-4 py-2">Confianza</th>
                     </tr>
                   </thead>
@@ -117,7 +189,7 @@ function DashboardPage() {
                           {b.price_usdt && b.price_usdt > 0 ? b.price_usdt.toFixed(6) : "—"}
                         </td>
                         <td className="px-4 py-2 text-black font-medium">
-                          {b.total_usd?.toFixed(2) ?? "0.00"}
+                          {b.total_usd?.toFixed(2) ?? "—"}
                         </td>
                         <td className="px-4 py-2 text-indigo-700">
                           {b.average_price_status === "DISPONIBLE"
@@ -137,6 +209,11 @@ function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {meta.modo === "PAPER" && meta.posiciones > 0 && (
+                <p className="text-xs text-gray-500 mt-2">
+                  * El P&L abierto es mark-to-market: incluye el coste de entrada ya ejecutado, pero no una fee ni slippage hipotéticos de salida. El P&L realizado sí usa los fills y fees persistidos.
+                </p>
+              )}
             </div>
 
             <BalanceChart data={balances} />
