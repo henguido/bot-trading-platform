@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -5,13 +6,14 @@ import pytest
 from backend.simulation.paper_ledger import reconstruir_paper
 
 
-def op(side, qty, quote_net, fee, symbol="BTCUSDT"):
+def op(side, qty, quote_net, fee, symbol="BTCUSDT", creada_en=None):
     return SimpleNamespace(
         symbol=symbol,
         side=side,
         base_quantity=qty,
         quote_net=quote_net,
         fee_usd=fee,
+        creada_en=creada_en,
     )
 
 
@@ -61,3 +63,32 @@ def test_cerrar_posicion_elimina_exposicion_y_conserva_pnl_neto():
     assert estado.exposicion_coste_usd == 0
     assert estado.capital_usd == pytest.approx(100.979)
     assert estado.realized_pnl_usd == pytest.approx(0.979)
+
+
+def test_pnl_diario_usa_ventana_de_riesgo_y_sigue_siendo_neto():
+    """Costa Rica: el 26-08-2026 empieza a las 06:00 UTC."""
+    estado = reconstruir_paper(100, [
+        # Coste unitario neto = 10.01, anterior al dia que medimos.
+        op("BUY", 1, 10.01, 0.01, creada_en=datetime(2026, 8, 25, 4, 0)),
+        # 05:00 UTC todavia pertenece al dia de riesgo anterior.
+        op("SELL", 0.5, 5.4945, 0.0055,
+           creada_en=datetime(2026, 8, 26, 5, 0)),
+        # 07:00 UTC ya cae dentro del 26 de agosto en America/Costa_Rica.
+        op("SELL", 0.5, 5.994, 0.006,
+           creada_en=datetime(2026, 8, 26, 7, 0)),
+    ], dia=date(2026, 8, 26))
+
+    # PnL de la venta del dia: 5.994 - (0.5 * 10.01) = 0.989 USDT.
+    assert estado.realized_pnl_dia_usd == pytest.approx(0.989)
+    assert estado.operaciones_dia == 1
+    # El acumulado conserva tambien la venta del dia anterior.
+    assert estado.realized_pnl_usd == pytest.approx(1.4785)
+
+
+def test_sin_dia_no_inventa_pnl_diario():
+    estado = reconstruir_paper(100, [
+        op("BUY", 1, 10.01, 0.01, creada_en=datetime(2026, 8, 26, 7, 0)),
+        op("SELL", 1, 10.989, 0.011, creada_en=datetime(2026, 8, 26, 8, 0)),
+    ])
+    assert estado.realized_pnl_dia_usd == 0.0
+    assert estado.operaciones_dia == 0
