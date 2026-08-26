@@ -246,6 +246,31 @@ def get_min_notional(symbol, filters_dict):
             return float(f.get("minNotional", 1.0))
     return 1.0
 
+def _obtener_assets_con_costes(*, medidor=None):
+    """Normaliza 3/4 valores sin inventar costes."""
+    try:
+        resultado = get_available_assets(
+            medidor=medidor, incluir_costes_cuenta=True)
+    except TypeError as e:
+        if "incluir_costes_cuenta" not in str(e):
+            raise
+        resultado = get_available_assets(medidor=medidor)
+
+    if len(resultado) == 4:
+        return resultado
+    if len(resultado) == 3:
+        assets, balances, symbols_info = resultado
+        return assets, balances, symbols_info, {
+            "fee_taker_bps_por_lado": None,
+            "fee_maker_bps_por_lado": None,
+            "fuente_fee": "NO_DISPONIBLE",
+            "fuente_fee_maker": "NO_DISPONIBLE",
+        }
+    raise ValueError(
+        f"get_available_assets devolvio {len(resultado)} elementos; "
+        "se esperaban 3 o 4")
+
+
 # Lógica principal del bot
 def trading_loop():
     ciclo = 0
@@ -322,11 +347,10 @@ def trading_loop():
             print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             try:
-                # Reutiliza el MISMO GET /account que ya obtiene balances para
-                # extraer la fee taker. No añade una peticion al ciclo.
-                resultado_assets = get_available_assets(
-                    medidor=medidor, incluir_costes_cuenta=True)
-                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets
+                # Reutiliza el MISMO GET /account que ya obtiene balances.
+                # Los adaptadores legacy conservan fee desconocida, nunca cero.
+                (assets_disponibles, balances_reales, symbols_info,
+                 costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)
             except Exception as e:
                 print(f"❌ Error al inicializar Binance o traer datos: {e}")
                 esperar_ciclo = True
