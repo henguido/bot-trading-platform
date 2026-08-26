@@ -1,36 +1,49 @@
 """
-Separacion estructural PAPER / LIVE  (P0-15).
+Separacion estructural PAPER / LIVE  (P0-15, PAPER v1).
 
-Antes, el bucle de trading manipulaba a la vez el Simulator, los saldos reales
-de Binance y la base de datos. En PAPER eso provocaba que el bloque de limpieza
-viese `saldo_real == 0` para toda posicion simulada y la borrase en cada ciclo,
-ademas de escribir en la BD. PAPER era inutilizable y contaminaba el ledger.
+Cada modo tiene una fuente de verdad distinta y el bucle habla unicamente con
+esta interfaz:
 
-La correccion no es repartir `if not MODO_REAL` por el codigo. Cada modo tiene
-su propia clase, y el bucle habla UNICAMENTE con la interfaz:
-
-    CarteraPaper   estado en el Simulator (memoria). NUNCA recibe saldos del
-                   broker: no existe ningun parametro por el que pudieran
-                   entrar. Nunca escribe en la base de datos.
+    CarteraPaper   journal persistente `paper_operaciones`. Reconstruye capital,
+                   posiciones y P&L neto; usa profundidad publica solo al
+                   simular un fill. Nunca recibe saldos del broker ni envia
+                   ordenes reales.
 
     CarteraLive    estado en la base de datos + saldos del exchange. Persiste
                    solo tras confirmacion del broker.
 
-Que PAPER ignore los saldos reales no es una comprobacion en tiempo de
-ejecucion: es que su constructor no los admite.
+No se mezclan tablas: PAPER nunca escribe `transacciones`, `ordenes` ni `fills`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from backend.app.services.ordenes import EstadoOrden, Lado, ResultadoOrden
+from backend.app.database import SessionLocal
+from backend.app.services.ordenes import (
+    EstadoOrden,
+    Lado,
+    ResultadoOrden,
+    error_pre_envio,
+)
 from backend.app.services.real_trading import (
     ejecutar_y_registrar_compra,
     ejecutar_y_registrar_venta,
 )
+from backend.config import settings
+from backend.economia.ejecucion_paper import calcular_fill_compra, calcular_fill_venta
 from backend.finanzas import precio_medio_de
-from backend.risk.estado import calcular_estado_riesgo, calcular_estado_riesgo_paper
+from backend.risk import reloj
+from backend.risk.estado import EstadoRiesgo, Posicion, calcular_estado_riesgo
+from backend.simulation.paper_ledger import (
+    estado_desde_db,
+    obtener_o_crear_ledger,
+    registrar_fill,
+    ultima_venta_desde_db,
+)
+
+_BPS = Decimal("10000")
 
 
 @dataclass(frozen=True)
@@ -43,121 +56,254 @@ class ContextoPosicionLLM:
     ultimo_precio_venta: Optional[float] = None
 
 
-def _ultimo_precio_venta_paper(simulador, symbol):
-    """Ultimo precio de venta del libro PAPER, o None si no existe."""
-    for entrada in reversed(getattr(simulador, "history", ()) or ()):
-        if not isinstance(entrada, dict):
-            continue
-        if entrada.get("symbol") != symbol or entrada.get("action") != "VENTA":
-            continue
-        try:
-            precio = float(entrada.get("price"))
-        except (TypeError, ValueError):
-            return None
-        return precio if precio > 0 else None
-    return None
-
-
 class CarteraPaper:
-    """
-    Cartera simulada. Su unica fuente de verdad es el Simulator en memoria.
+    """Cartera PAPER persistente y economicamente conservadora.
 
-    Deliberadamente NO recibe `saldos_broker` ni `usuario_id`: no puede leer
-    saldos reales ni escribir transacciones LIVE aunque alguien lo intente.
+    La fuente de verdad es el journal de la BD. El constructor no admite
+    saldos del broker ni trader. La unica dependencia externa opcional es un
+    proveedor de PROFUNDIDAD de mercado, usado exclusivamente despues de que
+    MotorRiesgo haya aprobado una operacion.
     """
 
     modo = "PAPER"
     usa_broker = False
 
-    def __init__(self, simulador):
-        self._sim = simulador
+    def __init__(
+        self,
+        *,
+        usuario_id,
+        session_factory=SessionLocal,
+        initial_capital_usd=None,
+        fee_taker_bps_por_lado=None,
+        order_book_provider=None,
+    ):
+        if usuario_id is None:
+            raise ValueError("CarteraPaper exige usuario_id")
+        self.usuario_id = usuario_id
+        self._session_factory = session_factory
+        self._initial_capital_usd = float(
+            settings.INITIAL_CAPITAL_USD
+            if initial_capital_usd is None else initial_capital_usd
+        )
+        self._fee_taker_bps_por_lado = fee_taker_bps_por_lado
+        self._order_book_provider = order_book_provider
+
+    def _estado(self, *, dia=None):
+        """Reconstruye desde el journal; crea el ledger una sola vez si falta."""
+        with self._session_factory() as db:
+            ledger = obtener_o_crear_ledger(
+                db,
+                usuario_id=self.usuario_id,
+                initial_capital_usd=self._initial_capital_usd,
+            )
+            estado = estado_desde_db(db, ledger, dia=dia)
+            # Si el ledger acaba de crearse, el commit lo hace durable. Si ya
+            # existia, es un commit sin cambios economicos.
+            db.commit()
+            return estado
 
     def capital_disponible(self) -> float:
-        return float(self._sim.capital_usd)
+        return float(self._estado().capital_usd)
 
     def cantidad_disponible(self, symbol) -> float:
-        posicion = self._sim.positions.get(symbol)
-        return float(posicion.quantity) if posicion else 0.0
+        posicion = self._estado().posiciones.get(str(symbol).strip().upper())
+        return float(posicion.cantidad) if posicion else 0.0
 
     def contexto_posicion_llm(self, symbol) -> ContextoPosicionLLM:
-        """
-        Contexto para IA exclusivamente desde el libro PAPER.
+        symbol = str(symbol).strip().upper()
+        with self._session_factory() as db:
+            ledger = obtener_o_crear_ledger(
+                db,
+                usuario_id=self.usuario_id,
+                initial_capital_usd=self._initial_capital_usd,
+            )
+            estado = estado_desde_db(db, ledger)
+            posicion = estado.posiciones.get(symbol)
+            ultimo_precio_venta = ultima_venta_desde_db(db, ledger, symbol)
+            db.commit()
 
-        Ningun dato de coste, movimiento o saldo se consulta en la BD ni en el
-        broker. Asi GPT, RiskEngine y ejecucion observan el mismo modo.
-        """
-        posicion = self._sim.positions.get(symbol)
-        cantidad = float(posicion.quantity) if posicion else 0.0
-        medio = None
-        movimiento = None
-        if posicion is not None:
-            movimiento = getattr(posicion, "last_movement", None)
-            try:
-                candidato = float(getattr(posicion, "average_price", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                candidato = 0.0
-            if cantidad > 0 and candidato > 0:
-                medio = candidato
         return ContextoPosicionLLM(
-            cantidad=cantidad,
-            precio_medio=medio,
-            ultimo_movimiento=movimiento,
-            ultimo_precio_venta=_ultimo_precio_venta_paper(self._sim, symbol),
+            cantidad=float(posicion.cantidad) if posicion else 0.0,
+            precio_medio=(float(posicion.coste_medio_neto) if posicion else None),
+            # El Simulator tenia un timestamp mutable en memoria. El journal ya
+            # conserva `creada_en`; mientras no se exponga un helper especifico
+            # no se inventa un valor equivalente.
+            ultimo_movimiento=None,
+            ultimo_precio_venta=ultimo_precio_venta,
         )
 
     def portafolio_para_llm(self):
-        """Snapshot del portafolio PAPER; nunca contiene balances del broker."""
+        """Snapshot PAPER reconstruido; nunca contiene balances del broker."""
+        estado = self._estado()
         salida = []
-        capital = self.capital_disponible()
-        if capital > 0:
-            salida.append({"moneda": "USDT", "cantidad": round(capital, 6)})
-        for symbol, posicion in sorted(self._sim.positions.items()):
-            try:
-                cantidad = float(posicion.quantity)
-            except (TypeError, ValueError):
-                continue
-            if cantidad <= 0:
+        if estado.capital_usd > 0:
+            salida.append({"moneda": "USDT", "cantidad": round(estado.capital_usd, 6)})
+        for symbol, posicion in sorted(estado.posiciones.items()):
+            if posicion.cantidad <= 0:
                 continue
             moneda = symbol[:-4] if symbol.endswith("USDT") else symbol
-            salida.append({"moneda": moneda, "cantidad": round(cantidad, 6)})
+            salida.append({"moneda": moneda, "cantidad": round(posicion.cantidad, 6)})
         return salida
 
     def estado_riesgo(self, dia=None):
-        return calcular_estado_riesgo_paper(self._sim, dia=dia)
+        dia = dia or reloj.dia_de_riesgo()
+        estado = self._estado(dia=dia)
+        return EstadoRiesgo(
+            dia=dia,
+            posiciones={
+                symbol: Posicion(
+                    cantidad=posicion.cantidad,
+                    coste_medio=posicion.coste_medio_neto,
+                )
+                for symbol, posicion in estado.posiciones.items()
+            },
+            pnl_realizado_dia=estado.realized_pnl_dia_usd,
+            operaciones_dia=estado.operaciones_dia,
+            ordenes_pendientes=0,
+        )
 
     def limpiar_posiciones_sin_respaldo(self, saldos_broker=None) -> int:
-        """
-        No-op POR DEFINICION.
-
-        Una posicion PAPER no tiene ni debe tener respaldo en el exchange. Este
-        era exactamente el bug P0-15: comparar posiciones simuladas contra
-        saldos reales las borraba en cada ciclo. El parametro se acepta y se
-        ignora para mantener una interfaz unica.
-        """
+        """No-op: una posicion PAPER no necesita respaldo en el exchange."""
         return 0
 
+    @staticmethod
+    def _decimal_positivo(valor, nombre):
+        try:
+            d = Decimal(str(valor))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError(f"{nombre} no es numerico") from None
+        if not d.is_finite() or d <= 0:
+            raise ValueError(f"{nombre} debe ser finito y positivo")
+        return d
+
+    def _fee_bps(self):
+        return self._decimal_positivo(
+            self._fee_taker_bps_por_lado,
+            "fee_taker_bps_por_lado",
+        )
+
+    def _obtener_book(self, symbol):
+        if not callable(self._order_book_provider):
+            raise ValueError("PAPER no tiene proveedor de profundidad")
+        book = self._order_book_provider(symbol)
+        if not isinstance(book, dict):
+            raise ValueError("profundidad PAPER no disponible")
+        return book
+
     def ejecutar(self, veredicto, precio, *, trader=None) -> ResultadoOrden:
-        """Aplica la operacion al libro en memoria. Jamas toca la BD."""
-        accion = "COMPRAR" if veredicto.side is Lado.COMPRA else "VENDER"
-        self._sim.simulate_trade(veredicto.symbol, accion, precio,
-                                 veredicto.approved_base_quantity)
+        """Simula un fill taker realista y lo persiste atomically.
+
+        BUY: `approved_quote_amount` es el tope TOTAL de capital. Se descuenta
+        primero el efecto de la fee para que notional+fee nunca lo supere.
+        SELL: se caminan bids por la cantidad base aprobada.
+
+        Si fee, profundidad, liquidez o persistencia son desconocidas, falla
+        cerrado y no aparece ninguna operacion en el journal.
+        """
+        symbol = veredicto.symbol
+        lado = veredicto.side
+        try:
+            fee_bps = self._fee_bps()
+            book = self._obtener_book(symbol)
+
+            if lado is Lado.COMPRA:
+                aprobado = self._decimal_positivo(
+                    veredicto.approved_quote_amount,
+                    "approved_quote_amount",
+                )
+                factor_fee = Decimal("1") + fee_bps / _BPS
+                presupuesto_bruto = aprobado / factor_fee
+                fill = calcular_fill_compra(
+                    order_book=book,
+                    quote_amount=presupuesto_bruto,
+                    fee_taker_bps_por_lado=fee_bps,
+                )
+                requested_quote = float(aprobado)
+                requested_base = None
+            else:
+                base = self._decimal_positivo(
+                    veredicto.approved_base_quantity,
+                    "approved_base_quantity",
+                )
+                fill = calcular_fill_venta(
+                    order_book=book,
+                    base_quantity=base,
+                    fee_taker_bps_por_lado=fee_bps,
+                )
+                requested_quote = None
+                requested_base = float(base)
+        except Exception as exc:
+            return error_pre_envio(
+                symbol,
+                lado,
+                f"PAPER no pudo modelar ejecucion: {type(exc).__name__}: {exc}",
+                base_quantity=(None if lado is Lado.COMPRA else
+                               getattr(veredicto, "approved_base_quantity", None)),
+                quote_amount=(getattr(veredicto, "approved_quote_amount", None)
+                              if lado is Lado.COMPRA else None),
+            )
+
+        if not fill.completo:
+            return error_pre_envio(
+                symbol,
+                lado,
+                f"PAPER sin fill completo: {fill.motivo or fill.estado}",
+                base_quantity=requested_base,
+                quote_amount=requested_quote,
+            )
+
+        if lado is Lado.COMPRA:
+            # Invariante economica: riesgo aprueba efectivo total, no solo
+            # notional. Nunca se permite que la fee lo empuje por encima.
+            if fill.quote_neto is None or fill.quote_neto > aprobado + Decimal("1e-12"):
+                return error_pre_envio(
+                    symbol,
+                    lado,
+                    "PAPER excederia el capital aprobado al incluir la fee",
+                    quote_amount=requested_quote,
+                )
+
+        try:
+            with self._session_factory() as db:
+                ledger = obtener_o_crear_ledger(
+                    db,
+                    usuario_id=self.usuario_id,
+                    initial_capital_usd=self._initial_capital_usd,
+                )
+                registrar_fill(
+                    db,
+                    ledger=ledger,
+                    symbol=symbol,
+                    reference_price=precio,
+                    fill=fill,
+                )
+                db.commit()
+        except Exception as exc:
+            return error_pre_envio(
+                symbol,
+                lado,
+                f"PAPER no pudo persistir fill: {type(exc).__name__}: {exc}",
+                base_quantity=requested_base,
+                quote_amount=requested_quote,
+            )
+
         return ResultadoOrden(
-            symbol=veredicto.symbol, side=veredicto.side,
+            symbol=symbol,
+            side=lado,
             estado=EstadoOrden.EJECUTADA,
-            executed_base_quantity=veredicto.approved_base_quantity,
-            executed_quote_amount=veredicto.approved_base_quantity * precio,
-            average_fill_price=precio,
+            requested_base_quantity=requested_base,
+            requested_quote_amount=requested_quote,
+            executed_base_quantity=float(fill.base_ejecutada),
+            # Semantica compatible con cummulativeQuoteQty: notional bruto; la
+            # fee vive separada y el ledger usa quote_net para el efectivo.
+            executed_quote_amount=float(fill.quote_bruto),
+            average_fill_price=float(fill.precio_vwap),
             order_id=None,
         )
 
 
 class CarteraLive:
-    """
-    Cartera real. Estado en la base de datos; saldos y ejecucion en el exchange.
-
-    Solo se instancia cuando MODO_REAL esta activo. Persiste unicamente tras la
-    confirmacion del broker (contrato de P0-1/P0-2).
-    """
+    """Cartera real: estado persistente + saldos y ejecucion del exchange."""
 
     modo = "LIVE"
     usa_broker = True
@@ -180,7 +326,6 @@ class CarteraLive:
         return float(self._saldos.get(symbol.replace("USDT", ""), 0.0))
 
     def contexto_posicion_llm(self, symbol) -> ContextoPosicionLLM:
-        """Contexto LIVE: saldo broker + coste/historial persistente."""
         return ContextoPosicionLLM(
             cantidad=self.cantidad_disponible(symbol),
             precio_medio=precio_medio_de(self._estado_persistente, symbol),
@@ -189,7 +334,6 @@ class CarteraLive:
         )
 
     def portafolio_para_llm(self):
-        """Snapshot LIVE exclusivamente desde los saldos del broker."""
         salida = []
         for moneda, cantidad_bruta in sorted(self._saldos.items()):
             try:
@@ -207,14 +351,6 @@ class CarteraLive:
         return calcular_estado_riesgo(self.usuario_id, **kwargs)
 
     def limpiar_posiciones_sin_respaldo(self, saldos_broker=None) -> int:
-        """
-        Reservado para la reconciliacion real (P0-14), aun no implementada.
-
-        El bloque antiguo reseteaba `Portfolio.balance_inicial` a partir de los
-        saldos del exchange, lo que no es reconciliacion sino perdida de datos:
-        borraba el historial local sin consultar las ordenes del broker. Se
-        deja como no-op explicito hasta tener el reconciliador.
-        """
         return 0
 
     def ejecutar(self, veredicto, precio, *, trader) -> ResultadoOrden:
@@ -232,13 +368,6 @@ class CarteraLive:
 
 
 def contexto_posicion_para_llm(cartera, symbol) -> ContextoPosicionLLM:
-    """
-    Adaptador para el bucle y sus dobles de prueba.
-
-    Las carteras reales implementan `contexto_posicion_llm`. Un doble antiguo
-    que solo exponga `cantidad_disponible` degrada de forma segura a cantidad +
-    metadatos desconocidos; nunca consulta otra fuente por su cuenta.
-    """
     metodo = getattr(cartera, "contexto_posicion_llm", None)
     if callable(metodo):
         return metodo(symbol)
@@ -251,7 +380,6 @@ def contexto_posicion_para_llm(cartera, symbol) -> ContextoPosicionLLM:
 
 
 def portafolio_para_llm(cartera):
-    """Snapshot financiero del modo activo, con fallback seguro para dobles."""
     metodo = getattr(cartera, "portafolio_para_llm", None)
     if callable(metodo):
         return metodo()
@@ -260,14 +388,22 @@ def portafolio_para_llm(cartera):
             if capital > 0 else [])
 
 
-def construir_cartera(*, modo_real, simulador, usuario_id=None,
-                      saldos_broker=None, usdt_broker=0.0, session_factory=None,
-                      estado_persistente=None, ultimos_movimientos=None,
-                      ultimos_precios_venta=None):
-    """
-    Unico punto donde se decide el modo. A partir de aqui el bucle no vuelve a
-    preguntar si estamos en PAPER o en LIVE.
-    """
+def construir_cartera(
+    *,
+    modo_real,
+    simulador=None,  # compatibilidad de llamada; PAPER ya no lo usa como estado
+    usuario_id=None,
+    saldos_broker=None,
+    usdt_broker=0.0,
+    session_factory=None,
+    estado_persistente=None,
+    ultimos_movimientos=None,
+    ultimos_precios_venta=None,
+    paper_initial_capital_usd=None,
+    paper_fee_taker_bps_por_lado=None,
+    paper_order_book_provider=None,
+):
+    """Unico punto donde se decide el modo; luego el bucle no vuelve a mezclar."""
     if modo_real:
         return CarteraLive(
             usuario_id=usuario_id,
@@ -278,4 +414,12 @@ def construir_cartera(*, modo_real, simulador, usuario_id=None,
             ultimos_movimientos=ultimos_movimientos,
             ultimos_precios_venta=ultimos_precios_venta,
         )
-    return CarteraPaper(simulador)
+    return CarteraPaper(
+        usuario_id=usuario_id,
+        session_factory=session_factory or SessionLocal,
+        initial_capital_usd=(settings.INITIAL_CAPITAL_USD
+                             if paper_initial_capital_usd is None
+                             else paper_initial_capital_usd),
+        fee_taker_bps_por_lado=paper_fee_taker_bps_por_lado,
+        order_book_provider=paper_order_book_provider,
+    )
