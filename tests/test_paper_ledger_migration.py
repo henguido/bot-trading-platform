@@ -27,18 +27,20 @@ def test_0006_encadena_exclusivamente_desde_0005():
     assert 'down_revision = "0005_telemetria_http"' in fuente
 
 
-def test_upgrade_head_crea_ledger_paper_separado(tmp_path):
+def test_upgrade_0006_crea_ledger_paper_separado(tmp_path):
+    """Prueba 0006 de forma aislada aunque el repositorio tenga heads posteriores."""
     url = f"sqlite:///{tmp_path / 'paper.db'}"
     previo = os.environ.get("DATABASE_URL")
     try:
         cfg = _configurar(url)
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, "0006_paper_ledger")
 
         engine = sa.create_engine(url)
         insp = sa.inspect(engine)
         tablas = set(insp.get_table_names())
         assert {"paper_ledgers", "paper_operaciones"} <= tablas
         assert {"transacciones", "ordenes", "fills"} <= tablas
+        assert "decision_cycle_audit" not in tablas
 
         cols = {c["name"] for c in insp.get_columns("paper_operaciones")}
         assert {
