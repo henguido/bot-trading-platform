@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from backend.app import models
 from backend.app.database import get_db
 from backend.app.auth import get_current_user
+from backend.observabilidad.ciclos import ultimos_resumenes
 
 router = APIRouter()
 
@@ -40,3 +41,13 @@ def obtener_transacciones_reales(
             "fecha": tx.fecha_operacion.strftime("%Y-%m-%d %H:%M:%S")
         })
     return resultado
+
+
+@router.get("/api/decision-cycles", tags=["Observabilidad"])
+def obtener_ciclos_decision(
+    limite: int = Query(12, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Embudo reciente del usuario: explica ejecuciones y NO TRADE por ciclo."""
+    return ultimos_resumenes(db, usuario_id=current_user.id, limite=limite)
