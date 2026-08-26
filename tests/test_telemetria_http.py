@@ -1491,11 +1491,9 @@ def url_tmp(tmp_path):
     importlib.reload(settings)
 
 
-def test_0005_es_la_cabeza_y_encadena_con_0004():
-    from backend.esquema import revision_esperada
-
-    assert revision_esperada() == "0005_telemetria_http"
+def test_0005_declara_su_revision_y_encadena_con_0004():
     fuente = MIGRACION.read_text(encoding="utf-8")
+    assert 'revision = "0005_telemetria_http"' in fuente
     assert 'down_revision = "0004_telemetria"' in fuente
 
 
@@ -1534,7 +1532,7 @@ def test_0005_sobre_bd_con_datos_previos_solo_agrega(url_tmp):
         c.execute(sa.text("INSERT INTO usuarios (id,nombre,email,password_hash) "
                           "VALUES (1,'Prev','p@e.com','h')"))
 
-    command.upgrade(_alembic(url_tmp), "head")
+    command.upgrade(_alembic(url_tmp), "0005_telemetria_http")
 
     with engine.connect() as c:
         assert c.execute(sa.text(
