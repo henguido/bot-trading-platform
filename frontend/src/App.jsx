@@ -6,9 +6,19 @@ import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import TransaccionesRealesPage from "./pages/TransaccionesRealesPage";
 
+function haySesion() {
+  return Boolean(localStorage.getItem("token"));
+}
+
 function Inicio() {
-  const token = localStorage.getItem("token");
-  return <Navigate to={token ? "/dashboard" : "/login"} replace />;
+  return <Navigate to={haySesion() ? "/dashboard" : "/login"} replace />;
+}
+
+function RutaPrivada({ children }) {
+  if (!haySesion()) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
 }
 
 function App() {
@@ -18,11 +28,20 @@ function App() {
       <main>
         <Routes>
           <Route path="/" element={<Inicio />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route
+            path="/dashboard"
+            element={<RutaPrivada><DashboardPage /></RutaPrivada>}
+          />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/historial" element={<HistorialPage />} />
+          <Route
+            path="/historial"
+            element={<RutaPrivada><HistorialPage /></RutaPrivada>}
+          />
           <Route path="/signup" element={<SignupPage />} />
-          <Route path="/transacciones-reales" element={<TransaccionesRealesPage />} />
+          <Route
+            path="/transacciones-reales"
+            element={<RutaPrivada><TransaccionesRealesPage /></RutaPrivada>}
+          />
           <Route path="*" element={<Inicio />} />
         </Routes>
       </main>
