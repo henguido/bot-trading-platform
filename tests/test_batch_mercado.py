@@ -441,8 +441,6 @@ def ciclo(monkeypatch):
     monkeypatch.setattr(main, "precio_medio_de", lambda estado, symbol: None)
     from backend.risk import reloj
     from backend.risk.estado import EstadoRiesgo
-    # Capital holgado para que los 4 activos USDT del fixture sean elegibles y
-    # el ciclo llegue al LLM: aqui se mide trafico HTTP, no elegibilidad.
     monkeypatch.setattr(main, "construir_cartera",
                         lambda **k: SimpleNamespace(
                             modo="PAPER", capital_disponible=lambda: 1000.0,
@@ -774,18 +772,18 @@ def test_12_import_safety_permanece_intacto(monkeypatch):
 
 
 def test_02b_no_necesita_migracion_nueva():
-    """
-    `market_price_snapshot` cabe en la columna existente: no hay 0006.
-    """
+    """El snapshot batch cabe en el esquema de 0005; 0006 es solo PAPER."""
     from backend.app import models
-    from backend.esquema import revision_esperada
 
-    assert revision_esperada() == "0005_telemetria_http", \
-        "02B no debe introducir una migracion"
     ancho = models.CicloHttpAudit.__table__.c.operacion.type.length
     assert len("market_price_snapshot") <= ancho
-    assert not list((RAIZ / "migrations" / "versions").glob("0006*")), \
-        "no debe existir una migracion 0006"
+
+    migracion_paper = RAIZ / "migrations" / "versions" / "0006_paper_ledger.py"
+    assert migracion_paper.exists()
+    texto = migracion_paper.read_text(encoding="utf-8").lower()
+    assert "paper" in texto
+    assert "market_price_snapshot" not in texto
+    assert "ciclo_http_audit" not in texto
 
 
 def test_el_scheduling_y_la_cadencia_no_cambian():
