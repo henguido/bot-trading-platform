@@ -90,6 +90,33 @@ def contexto_economico_de(resultado: dict) -> dict:
     return salida
 
 
+def contexto_economico_para_ejecucion(engine: str, resultado: dict) -> tuple[dict, str | None]:
+    """Extrae economía confiable sin permitir que la telemetría altere trading.
+
+    Defensa en profundidad:
+    - GPT y SAFE_NO_TRADE nunca pueden aportar economía, aunque un resultado
+      llegara a contener esos campos por una regresión futura.
+    - un motor no registrado tampoco puede introducirla;
+    - para un motor determinista registrado, los valores se normalizan y los
+      desconocidos siguen ausentes;
+    - si la telemetría económica es inválida, se devuelve `{}` + diagnóstico.
+      Un error de observabilidad no cambia una decisión ya tomada ni el sizing
+      de MotorRiesgo.
+
+    Cuando se incorpore un motor determinista validado, bastará con declararlo
+    en ENGINES_VALIDOS y hacer que `decidir` devuelva sus campos económicos.
+    """
+    motor = str(engine or "").strip().upper()
+    if motor in (ENGINE_GPT, ENGINE_SAFE_NO_TRADE):
+        return {}, None
+    if motor not in ENGINES_VALIDOS:
+        return {}, "MOTOR_ECONOMICO_NO_CONFIABLE"
+    try:
+        return contexto_economico_de(resultado), None
+    except ValueError as exc:
+        return {}, f"ECONOMIA_INVALIDA:{exc}"
+
+
 def decidir(
     engine: str,
     *,
