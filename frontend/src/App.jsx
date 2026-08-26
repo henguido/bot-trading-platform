@@ -3,6 +3,7 @@ import Navbar from "./components/Navbar";
 import DashboardPage from "./pages/DashboardPage";
 import HistorialPage from "./pages/HistorialPage";
 import LoginPage from "./pages/LoginPage";
+import ObservabilityPage from "./pages/ObservabilityPage";
 import SignupPage from "./pages/SignupPage";
 import TransaccionesRealesPage from "./pages/TransaccionesRealesPage";
 
@@ -36,6 +37,10 @@ function App() {
           <Route
             path="/historial"
             element={<RutaPrivada><HistorialPage /></RutaPrivada>}
+          />
+          <Route
+            path="/observabilidad"
+            element={<RutaPrivada><ObservabilityPage /></RutaPrivada>}
           />
           <Route path="/signup" element={<SignupPage />} />
           <Route
