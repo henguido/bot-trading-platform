@@ -93,10 +93,10 @@ def calcular_fill_compra(*, order_book, quote_amount, fee_taker_bps_por_lado) ->
         return FillPaper(
             lado="BUY", estado=est.estado, base_ejecutada=None,
             quote_bruto=None, fee_usd=None, quote_neto=None,
-            mejor_precio=est.mejor_precio, precio_vwap=est.precio_vwap,
+            mejor_precio=est.best_price, precio_vwap=est.vwap,
             slippage_bps=est.slippage_bps,
             fee_taker_bps_por_lado=fee_bps,
-            motivo=est.motivo,
+            motivo=est.faltante,
         )
 
     quote = est.quote_ejecutado
@@ -107,8 +107,8 @@ def calcular_fill_compra(*, order_book, quote_amount, fee_taker_bps_por_lado) ->
         quote_bruto=quote,
         fee_usd=fee,
         quote_neto=quote + fee,
-        mejor_precio=est.mejor_precio,
-        precio_vwap=est.precio_vwap,
+        mejor_precio=est.best_price,
+        precio_vwap=est.vwap,
         slippage_bps=est.slippage_bps,
         fee_taker_bps_por_lado=fee_bps,
     )
@@ -130,10 +130,10 @@ def calcular_fill_venta(*, order_book, base_quantity, fee_taker_bps_por_lado) ->
         return FillPaper(
             lado="SELL", estado=est.estado, base_ejecutada=None,
             quote_bruto=None, fee_usd=None, quote_neto=None,
-            mejor_precio=est.mejor_precio, precio_vwap=est.precio_vwap,
+            mejor_precio=est.best_price, precio_vwap=est.vwap,
             slippage_bps=est.slippage_bps,
             fee_taker_bps_por_lado=fee_bps,
-            motivo=est.motivo,
+            motivo=est.faltante,
         )
 
     quote = est.quote_ejecutado
@@ -144,8 +144,8 @@ def calcular_fill_venta(*, order_book, base_quantity, fee_taker_bps_por_lado) ->
         quote_bruto=quote,
         fee_usd=fee,
         quote_neto=quote - fee,
-        mejor_precio=est.mejor_precio,
-        precio_vwap=est.precio_vwap,
+        mejor_precio=est.best_price,
+        precio_vwap=est.vwap,
         slippage_bps=est.slippage_bps,
         fee_taker_bps_por_lado=fee_bps,
     )
