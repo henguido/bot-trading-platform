@@ -139,7 +139,7 @@ def test_contexto_para_ejecucion_telemetria_invalida_no_lanza():
         de.ENGINES_VALIDOS = original
 
     assert contexto == {}
-    assert diagnostico.startswith("ECONOMIA_INVALIDA:")
+    assert diagnostico == "ECONOMIA_INVALIDA"
 
 
 def test_contexto_para_ejecucion_motor_determinista_registrado_normaliza():
