@@ -138,6 +138,16 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 # a la fase de optimizacion de IA, posterior a main.
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-2024-08-06').strip() or 'gpt-4o-2024-08-06'
 
+# Motor que genera decisiones. GPT conserva el comportamiento historico;
+# SAFE_NO_TRADE mantiene el proceso operativo sin llamar IA ni abrir compras.
+# El futuro motor determinista se añadira como opcion solo tras validacion OOS.
+DECISION_ENGINES_VALIDOS = ('GPT', 'SAFE_NO_TRADE')
+DECISION_ENGINE = os.getenv('DECISION_ENGINE', 'GPT').strip().upper() or 'GPT'
+if DECISION_ENGINE not in DECISION_ENGINES_VALIDOS:
+    raise RuntimeError(
+        f"DECISION_ENGINE={DECISION_ENGINE!r} no es valido. Usa uno de: "
+        f"{', '.join(DECISION_ENGINES_VALIDOS)}")
+
 # Timeout de red para las llamadas al LLM. Unidad: SEGUNDOS.
 # Antes no habia ninguno: una peticion colgada bloqueaba el hilo de trading
 # indefinidamente, sin ciclo, sin logs y con el kill switch inoperante.

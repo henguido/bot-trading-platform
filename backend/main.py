@@ -30,7 +30,7 @@ from backend.connectors.apis.real_trading_connector import RealTradingConnector
 from backend.app.auth import get_current_user
 from backend.app.services.ordenes import Lado, es_cantidad_valida, validar_peticion_venta
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
-from backend import scanner
+from backend import scanner, decision_engine
 from backend.economia.profundidad import obtener_order_book
 from backend.economia.integracion_05e import (
     PROFITABILITY_GATE_05E_ENABLED,
@@ -591,7 +591,7 @@ def trading_loop():
 
             activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))
 
-            print(f"🎯 Enviando {len(activos_para_gpt)} activos a GPT para análisis")
+            print(f"🎯 Enviando {len(activos_para_gpt)} activos al motor {settings.DECISION_ENGINE}")
 
             if not activos_para_gpt:
                 print("⚠️ No hay activos para analizar con GPT")
@@ -631,17 +631,20 @@ def trading_loop():
             # Sella el tiempo de PARED consumido ANTES de gastar un solo token.
             # Es la metrica que explica los ~8 m 10 s del baseline frente a los
             # 1296 ms que costo la llamada al LLM.
-            medidor.marcar_fase_pre_llm(len(activos_para_gpt))
+            if settings.DECISION_ENGINE == decision_engine.ENGINE_GPT:
+                medidor.marcar_fase_pre_llm(len(activos_para_gpt))
 
-            resultados, explicacion_gpt = openai.analyze_multiple_assets(
-                activos_para_gpt,
-                usdt_disponible,
-                sentimiento,
-                noticias_str,
-                portafolio_contexto,
-                market_pairs_filtrados,
-                ciclo=ciclo,   # solo telemetria: permite agregar por ciclo
-                ciclo_id=medidor.ciclo_id,   # solo telemetria: correlacion HTTP
+            resultados, explicacion_gpt = decision_engine.decidir(
+                settings.DECISION_ENGINE,
+                openai=openai,
+                activos=activos_para_gpt,
+                usdt_disponible=usdt_disponible,
+                sentimiento=sentimiento,
+                noticias_str=noticias_str,
+                portafolio_contexto=portafolio_contexto,
+                market_pairs_filtrados=market_pairs_filtrados,
+                ciclo=ciclo,
+                ciclo_id=medidor.ciclo_id,
             )
 
             if not resultados:
