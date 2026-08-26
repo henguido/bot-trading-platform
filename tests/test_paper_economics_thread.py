@@ -32,6 +32,23 @@ def _fabrica_con_usuario():
     return engine, fabrica, uid
 
 
+def _symbol_info(*, step="0.001", min_qty="0.001", max_qty="10", min_notional="5"):
+    return {
+        "symbol": "BTCUSDT",
+        "status": "TRADING",
+        "isSpotTradingAllowed": True,
+        "filters": [
+            {
+                "filterType": "LOT_SIZE",
+                "minQty": min_qty,
+                "maxQty": max_qty,
+                "stepSize": step,
+            },
+            {"filterType": "NOTIONAL", "minNotional": min_notional},
+        ],
+    }
+
+
 def test_fill_paper_persiste_metadatos_economicos():
     engine, fabrica, uid = _fabrica_con_usuario()
     try:
@@ -69,6 +86,71 @@ def test_fill_paper_persiste_metadatos_economicos():
             assert op.expected_edge_bps == 42.0
             assert op.expected_cost_bps == 18.0
             assert op.expected_net_bps == 24.0
+    finally:
+        engine.dispose()
+
+
+def test_cartera_paper_productiva_cuantiza_al_lot_size_del_exchange():
+    engine, fabrica, uid = _fabrica_con_usuario()
+    try:
+        info = _symbol_info(step="0.03", min_qty="0.03", min_notional="5")
+        cartera = CarteraPaper(
+            usuario_id=uid,
+            session_factory=fabrica,
+            initial_capital_usd=500.0,
+            fee_taker_bps_por_lado=10.0,
+            order_book_provider=lambda _s: {
+                "asks": [["100", "1"]],
+                "bids": [["99", "1"]],
+            },
+            symbol_info_provider=lambda symbol: info if symbol == "BTCUSDT" else None,
+        )
+        veredicto = DecisionRiesgo(
+            aprobado=True,
+            symbol="BTCUSDT",
+            side=Lado.COMPRA,
+            approved_quote_amount=10.0,
+        )
+
+        resultado = cartera.ejecutar(veredicto, 100.0)
+
+        assert resultado.success is True
+        assert resultado.executed_base_quantity == pytest.approx(0.09)
+        with fabrica() as db:
+            op = db.query(models.PaperOperacion).one()
+            assert op.base_quantity == pytest.approx(0.09)
+            assert op.quote_gross == pytest.approx(9.0)
+            assert op.quote_net == pytest.approx(9.009)
+    finally:
+        engine.dispose()
+
+
+def test_cartera_paper_con_proveedor_pero_sin_filtros_falla_sin_persistir_fill():
+    engine, fabrica, uid = _fabrica_con_usuario()
+    try:
+        cartera = CarteraPaper(
+            usuario_id=uid,
+            session_factory=fabrica,
+            initial_capital_usd=500.0,
+            fee_taker_bps_por_lado=10.0,
+            order_book_provider=lambda _s: {
+                "asks": [["100", "1"]],
+                "bids": [["99", "1"]],
+            },
+            symbol_info_provider=lambda _symbol: {"symbol": "BTCUSDT", "filters": []},
+        )
+        veredicto = DecisionRiesgo(
+            aprobado=True,
+            symbol="BTCUSDT",
+            side=Lado.COMPRA,
+            approved_quote_amount=10.0,
+        )
+
+        resultado = cartera.ejecutar(veredicto, 100.0)
+
+        assert resultado.success is False
+        with fabrica() as db:
+            assert db.query(models.PaperOperacion).count() == 0
     finally:
         engine.dispose()
 
