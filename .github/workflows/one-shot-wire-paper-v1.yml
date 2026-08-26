@@ -39,81 +39,46 @@ jobs:
               'import profundidad',
           )
 
-          old_assets = '''            try:
-                assets_disponibles, balances_reales, symbols_info = get_available_assets(
-                    medidor=medidor)
-            except Exception as e:
-          '''
-          new_assets = '''            try:
-                # Reutiliza el MISMO GET /account que ya obtiene balances para
-                # extraer la fee taker. No añade una peticion al ciclo.
-                resultado_assets = get_available_assets(
-                    medidor=medidor, incluir_costes_cuenta=True)
-                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets
-            except TypeError as e:
-                # Compatibilidad exclusivamente con adaptadores/dobles antiguos
-                # que conservan la firma historica de tres elementos. Produccion
-                # usa siempre la firma con costes; desconocido nunca se vuelve 0.
-                if "incluir_costes_cuenta" not in str(e):
-                    raise
-                assets_disponibles, balances_reales, symbols_info = get_available_assets(
-                    medidor=medidor)
-                costes_cuenta = {
-                    "fee_taker_bps_por_lado": None,
-                    "fee_maker_bps_por_lado": None,
-                    "fuente_fee": "NO_DISPONIBLE",
-                    "fuente_fee_maker": "NO_DISPONIBLE",
-                }
-            except Exception as e:
-          '''
+          old_assets = (
+              '                assets_disponibles, balances_reales, symbols_info = get_available_assets(\n'
+              '                    medidor=medidor)'
+          )
+          new_assets = (
+              '                # Reutiliza el MISMO GET /account que ya obtiene balances para\n'
+              '                # extraer la fee taker. No añade una peticion al ciclo.\n'
+              '                resultado_assets = get_available_assets(\n'
+              '                    medidor=medidor, incluir_costes_cuenta=True)\n'
+              '                assets_disponibles, balances_reales, symbols_info, costes_cuenta = resultado_assets'
+          )
           replace_once(old_assets, new_assets, 'assets con costes')
 
-          old_cartera = '''            cartera = construir_cartera(
-                modo_real=settings.MODO_REAL,
-                simulador=simulator,
-                usuario_id=contexto.usuario_id,
-                saldos_broker=saldo_real_dict,
-                usdt_broker=saldo_real_dict.get("USDT", 0.0),
-                estado_persistente=contexto.estado,
-                ultimos_movimientos=contexto.ultimos_movimientos,
-                ultimos_precios_venta=contexto.ultimos_precios_venta,
-            )
-          '''
-          new_cartera = '''            cartera = construir_cartera(
-                modo_real=settings.MODO_REAL,
-                simulador=simulator,
-                usuario_id=contexto.usuario_id,
-                saldos_broker=saldo_real_dict,
-                usdt_broker=saldo_real_dict.get("USDT", 0.0),
-                session_factory=SessionLocal,
-                estado_persistente=contexto.estado,
-                ultimos_movimientos=contexto.ultimos_movimientos,
-                ultimos_precios_venta=contexto.ultimos_precios_venta,
-                paper_initial_capital_usd=settings.INITIAL_CAPITAL_USD,
-                paper_fee_taker_bps_por_lado=costes_cuenta.get(
-                    "fee_taker_bps_por_lado"),
-                paper_order_book_provider=(
-                    None if settings.MODO_REAL else
-                    lambda symbol: obtener_order_book(
-                        binance,
-                        symbol,
-                        limit=20,
-                        medicion=medidor.operacion("binance", "paper_order_book"),
-                    )
-                ),
-            )
-          '''
-          replace_once(old_cartera, new_cartera, 'construccion cartera')
-
-          replace_once(
-              '''                # activa. En PAPER, exclusivamente del Simulator; en LIVE,
-                # saldo broker + contexto persistente. El bucle no mezcla.
-          ''',
-              '''                # activa. En PAPER, exclusivamente del ledger persistente;
-                # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.
-          ''',
-              'comentario fuente PAPER',
+          old_usdt = '                usdt_broker=saldo_real_dict.get("USDT", 0.0),\n'
+          new_usdt = (
+              '                usdt_broker=saldo_real_dict.get("USDT", 0.0),\n'
+              '                session_factory=SessionLocal,\n'
+              '                paper_initial_capital_usd=settings.INITIAL_CAPITAL_USD,\n'
+              '                paper_fee_taker_bps_por_lado=costes_cuenta.get(\n'
+              '                    "fee_taker_bps_por_lado"),\n'
+              '                paper_order_book_provider=(\n'
+              '                    None if settings.MODO_REAL else\n'
+              '                    lambda symbol: obtener_order_book(\n'
+              '                        binance, symbol, limit=20,\n'
+              '                        medicion=medidor.operacion(\n'
+              '                            "binance", "paper_order_book"),\n'
+              '                    )\n'
+              '                ),\n'
           )
+          replace_once(old_usdt, new_usdt, 'dependencias PAPER')
+
+          old_comment = (
+              '                # activa. En PAPER, exclusivamente del Simulator; en LIVE,\n'
+              '                # saldo broker + contexto persistente. El bucle no mezcla.\n'
+          )
+          new_comment = (
+              '                # activa. En PAPER, exclusivamente del ledger persistente;\n'
+              '                # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.\n'
+          )
+          replace_once(old_comment, new_comment, 'comentario fuente PAPER')
 
           path.write_text(text, encoding='utf-8')
           PY
