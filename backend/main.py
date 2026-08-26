@@ -618,12 +618,16 @@ def trading_loop():
             if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:
                 print(pre_llm_05e.resumen.linea())
 
-            activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))
+            # El scanner ya devuelve posiciones abiertas primero. Este sort
+            # conserva explicitamente esa prioridad usando las claves internas
+            # reales, antes de retirarlas del payload del motor de decision.
+            activos_para_gpt.sort(key=lambda a: not (
+                a.get("_balance_detected") or a.get("_position_detected")))
 
             print(f"🎯 Enviando {len(activos_para_gpt)} activos al motor {settings.DECISION_ENGINE}")
 
             if not activos_para_gpt:
-                print("⚠️ No hay activos para analizar con GPT")
+                print("⚠️ No hay activos para analizar con el motor de decisión")
                 if resumen_decision_ciclo is not None:
                     resumen_decision_ciclo.anotar_omision("SIN_CANDIDATOS_MOTOR")
                 esperar_ciclo = True
@@ -646,7 +650,7 @@ def trading_loop():
             # 🔍 Identificar activos relevantes
             activos_relevantes = {
                 a["symbol"].replace("USDT", "") for a in activos_para_gpt
-                if a["position_quantity"] > 0 or a.get("balance_detected")
+                if a["position_quantity"] > 0 or a.get("_balance_detected")
             }
 
             # 🧹 Filtrar solo pares que involucren activos relevantes
@@ -654,7 +658,7 @@ def trading_loop():
                 p for p in market_pairs
                 if any(activo in p["pair"] for activo in activos_relevantes)
             ]
-            # Limpiar campos internos que no se deben enviar a GPT
+            # Limpiar campos internos que no se deben enviar al motor.
             for a in activos_para_gpt:
                 a.pop("_balance_detected", None)
                 a.pop("_position_detected", None)
@@ -681,10 +685,10 @@ def trading_loop():
             if not resultados:
                 if resumen_decision_ciclo is not None:
                     resumen_decision_ciclo.anotar_omision("MOTOR_SIN_RESULTADOS")
-                print("⚠️ GPT no devolvió JSON válido. Respuesta completa:")
+                print("⚠️ El motor no devolvió resultados válidos. Respuesta completa:")
                 print(explicacion_gpt)
                 simulator.audit_log.append({
-                    "symbol": "GPT",
+                    "symbol": "MOTOR",
                     "action": "EXPLICACION",
                     "price": 0.0,
                     "quantity": 0.0,
@@ -698,16 +702,18 @@ def trading_loop():
                     "risk_score": 0.0
                 })
                 continue
-            print("🧠 Resultados GPT:", resultados)
+            print("🧠 Resultados motor:", resultados)
 
             for resultado in resultados:
                 symbol = resultado.get("symbol")
                 decision = resultado.get("decision", "ESPERAR")
                 if resumen_decision_ciclo is not None:
                     resumen_decision_ciclo.anotar_decision(decision)
-                # GPT devuelve la cantidad en ACTIVO BASE (BTC en BTCUSDT).
+                # La cantidad sugerida por el motor se conserva para auditoria.
+                # En COMPRAS no es autoritativa: MotorRiesgo dimensiona de cero.
                 base_quantity = resultado.get("quantity", 0.0)
                 risk_score = resultado.get("risk_score", 0.0)
+                economics = {}
 
                 if not symbol:
                     if resumen_decision_ciclo is not None:
@@ -722,6 +728,23 @@ def trading_loop():
                     continue
 
                 if decision in ("COMPRAR", "VENDER"):
+                    # Economía es TELEMETRÍA, no autoridad. GPT/SAFE siempre
+                    # producen {} por defensa en profundidad. Un futuro motor
+                    # determinista registrado puede aportar strategy + expected
+                    # edge/cost/net; datos inválidos se descartan sin bloquear
+                    # una decisión ni modificar el sizing de MotorRiesgo.
+                    economics, diagnostico_economia = (
+                        decision_engine.contexto_economico_para_ejecucion(
+                            settings.DECISION_ENGINE, resultado)
+                    )
+                    if diagnostico_economia:
+                        if resumen_decision_ciclo is not None:
+                            resumen_decision_ciclo.anotar_omision(
+                                diagnostico_economia)
+                        imprimir_resistente(
+                            f"[ECONOMIA] {symbol}: {diagnostico_economia}; "
+                            "ejecucion continua sin metadata expected")
+
                     lado = Lado.COMPRA if decision == "COMPRAR" else Lado.VENTA
 
                     if lado is Lado.COMPRA:
@@ -740,8 +763,8 @@ def trading_loop():
                     # ordenes. Cada cartera sabe cual es SU fuente de verdad.
                     estado_riesgo = cartera.estado_riesgo()
 
-                    # base_quantity viene del modelo y NO ES AUTORITATIVA para
-                    # el tamano: el motor lo recalcula desde cero.
+                    # base_quantity viene del motor y NO ES AUTORITATIVA para
+                    # compras: el MotorRiesgo recalcula el tamano desde cero.
                     propuesta = PropuestaOperacion(
                         symbol=symbol, side=lado, precio=precio_actual,
                         base_quantity_modelo=base_quantity,
@@ -762,10 +785,14 @@ def trading_loop():
                         continue
 
                     # Un unico punto de ejecucion para ambos modos. La cartera
-                    # decide si es un apunte en memoria o una orden real
-                    # persistida tras confirmacion del broker.
-                    ejecucion = cartera.ejecutar(veredicto, precio_actual,
-                                                 trader=real_trader)
+                    # decide si es un fill PAPER persistido o una orden LIVE.
+                    # `economics` solo acompana la auditoria; no entra al riesgo.
+                    ejecucion = cartera.ejecutar(
+                        veredicto,
+                        precio_actual,
+                        trader=real_trader,
+                        economics=economics,
+                    )
                     if resumen_decision_ciclo is not None:
                         resumen_decision_ciclo.anotar_ejecucion(
                             success=bool(ejecucion.success),
@@ -789,15 +816,15 @@ def trading_loop():
                     "symbol": symbol,
                     "action": decision,
                     "price": precio_actual,
-                    # Cantidad DECIDIDA por GPT, en activo base. Es la intencion,
-                    # no una ejecucion: la auditoria registra decisiones.
+                    # Cantidad propuesta por el motor; es intencion, no fill.
                     "quantity": base_quantity,
                     "timestamp": ahora.astimezone(pytz.timezone("America/Costa_Rica")).strftime("%Y-%m-%d %H:%M:%S"),
 
                     "context": {
                         "sentimiento": sentimiento,
                         "noticias": noticias_str,
-                        "risk_score": risk_score
+                        "risk_score": risk_score,
+                        "economics": economics,
                     },
                     "decision_gpt": explicacion_gpt,
                     "risk_score": risk_score
@@ -817,7 +844,7 @@ def trading_loop():
                             decision_gpt=explicacion_gpt
                         )
                 except Exception as e:
-                    print(f"⚠️ Error guardando auditoría GPT: {e}")
+                    print(f"⚠️ Error guardando auditoría de decisión: {e}")
 
 
         except Exception as e:
