@@ -173,6 +173,35 @@ class BinanceConnector:
         anotar_elementos(op, len(metricas))
         return metricas
 
+    def get_exchange_symbols_info(self, medicion=None):
+        """Snapshot público batch de reglas operables por símbolo.
+
+        Usa una sola llamada GET /api/v3/exchangeInfo y devuelve un mapping
+        `{symbol: symbol_info}`. No consulta cuenta, balances ni credenciales
+        privadas. Si falla, devuelve `{}`: filtros desconocidos nunca se
+        convierten en defaults favorables.
+        """
+        self.init_client()
+        op = medicion if medicion is not None else OPERACION_NULA
+        try:
+            with op.peticion(observador=self.observador_http()):
+                payload = self.client.get_exchange_info()
+        except Exception as e:
+            print(f"⚠️ No se pudo obtener exchangeInfo de Binance: "
+                  f"{type(e).__name__}: {e}")
+            return {}
+
+        filas = payload.get("symbols", ()) if isinstance(payload, dict) else ()
+        salida = {}
+        for fila in filas or ():
+            if not isinstance(fila, dict):
+                continue
+            symbol = fila.get("symbol")
+            if symbol:
+                salida[str(symbol)] = fila
+        anotar_elementos(op, len(salida))
+        return salida
+
     def get_multiple_prices(self, symbols, snapshot=None, medicion=None):
         """Precios de `symbols`, resueltos desde el snapshot batch del ciclo."""
         op = medicion if medicion is not None else OPERACION_NULA
