@@ -128,6 +128,42 @@ def estimar_slippage_compra(asks: Sequence, *, quote_amount) -> EstimacionSlippa
                               base, quote)
 
 
+def estimar_slippage_compra_base(asks: Sequence, *, base_quantity) -> EstimacionSlippage:
+    """Camina asks para comprar una cantidad BASE exacta.
+
+    Es el espejo de `estimar_slippage_venta`, pero sobre asks. Se usa cuando el
+    simulador PAPER ya cuantizo la cantidad al LOT_SIZE del exchange: primero
+    se decide una cantidad que Binance aceptaria y despues se calcula su VWAP.
+    """
+    objetivo = _decimal(base_quantity, nombre="base_quantity")
+    if objetivo <= 0:
+        raise ValueError("base_quantity debe ser positivo")
+    niveles = _niveles_validos(asks, asks=True)
+    if not niveles:
+        return EstimacionSlippage("BUY", NO_DISPONIBLE, None, None, None,
+                                  Decimal("0"), Decimal("0"), "sin_asks")
+
+    best = niveles[0][0]
+    restante = objetivo
+    base = Decimal("0")
+    quote = Decimal("0")
+    for precio, cantidad in niveles:
+        comprar = min(restante, cantidad)
+        base += comprar
+        quote += comprar * precio
+        restante -= comprar
+        if restante <= 0:
+            break
+
+    if restante > 0 or base <= 0:
+        return EstimacionSlippage("BUY", NO_DISPONIBLE, best, None, None,
+                                  base, quote, "profundidad_insuficiente")
+    vwap = quote / base
+    slippage = (vwap / best - Decimal("1")) * _BPS
+    return EstimacionSlippage("BUY", DISPONIBLE, best, vwap,
+                              max(slippage, Decimal("0")), base, quote)
+
+
 def estimar_slippage_venta(bids: Sequence, *, base_quantity) -> EstimacionSlippage:
     """Camina bids para vender `base_quantity`; slippage contra mejor BID."""
     objetivo = _decimal(base_quantity, nombre="base_quantity")
