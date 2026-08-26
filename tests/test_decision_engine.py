@@ -1,4 +1,10 @@
+from pathlib import Path
+
 from backend import decision_engine as de
+from backend.config import settings
+
+
+RAIZ = Path(__file__).resolve().parents[1]
 
 
 class OpenAIEspia:
@@ -62,3 +68,16 @@ def test_motor_desconocido_falla_cerrado():
         assert "DECISION_ENGINE" in str(exc)
     else:
         raise AssertionError("un motor desconocido no puede degradarse a GPT")
+
+
+def test_config_default_conserva_gpt_y_declara_safe_no_trade():
+    assert settings.DECISION_ENGINE == de.ENGINE_GPT
+    assert de.ENGINE_GPT in settings.DECISION_ENGINES_VALIDOS
+    assert de.ENGINE_SAFE_NO_TRADE in settings.DECISION_ENGINES_VALIDOS
+
+
+def test_main_delega_en_decision_engine_y_no_llama_openai_directamente():
+    main = (RAIZ / "backend" / "main.py").read_text(encoding="utf-8")
+    assert "decision_engine.decidir(" in main
+    assert "openai.analyze_multiple_assets(" not in main
+    assert "settings.DECISION_ENGINE" in main
