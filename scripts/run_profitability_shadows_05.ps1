@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 Write-Host "[SHADOW-05] Runner combinado PAPER. Ctrl+C para detener."
-Write-Host "[SHADOW-05] Ejecuta 05A + diagnosticos 05A/05F + scanner unificado 05I."
+Write-Host "[SHADOW-05] Ejecuta 05A + diagnosticos 05A/05F + scanner unificado 05I + challenger 05J."
 Write-Host "[SHADOW-05] 05C/05D/05G/05H quedan como diagnostico historico y no capturan nuevas cohortes."
 Write-Host "[SHADOW-05] Cadencia: $Hours horas."
 
@@ -25,6 +25,9 @@ while ($true) {
 
     python scripts\shadow_scanner_unified_05i.py
     if ($LASTEXITCODE -ne 0) { throw "05I fallo con codigo $LASTEXITCODE" }
+
+    python scripts\analyze_scanner_challenger_05j.py
+    if ($LASTEXITCODE -ne 0) { throw "05J fallo con codigo $LASTEXITCODE" }
 
     Write-Host "[SHADOW-05] Proxima ejecucion en $Hours horas."
     Start-Sleep -Seconds ($Hours * 3600)
