@@ -34,7 +34,7 @@ from backend.app.services.real_trading import (
 from backend.config import settings
 from backend.economia.ejecucion_paper import calcular_fill_compra, calcular_fill_venta
 from backend.finanzas import precio_medio_de
-from backend.risk import reloj
+from backend.risk import elegibilidad, reloj
 from backend.risk.estado import EstadoRiesgo, Posicion, calcular_estado_riesgo
 from backend.simulation.paper_ledger import (
     estado_desde_db,
@@ -60,9 +60,13 @@ class CarteraPaper:
     """Cartera PAPER persistente y economicamente conservadora.
 
     La fuente de verdad es el journal de la BD. El constructor no admite
-    saldos del broker ni trader. La unica dependencia externa opcional es un
-    proveedor de PROFUNDIDAD de mercado, usado exclusivamente despues de que
-    MotorRiesgo haya aprobado una operacion.
+    saldos del broker ni trader. Las dependencias externas opcionales son
+    proveedores publicos de profundidad y reglas del simbolo, usados solo
+    despues de que MotorRiesgo haya aprobado una operacion.
+
+    Si `symbol_info_provider` se configura, los filtros LOT_SIZE/NOTIONAL se
+    vuelven obligatorios (fail-closed). Omitir el proveedor conserva el contrato
+    de pruebas/consumidores legacy que ejercitan la cartera de forma aislada.
     """
 
     modo = "PAPER"
@@ -76,6 +80,7 @@ class CarteraPaper:
         initial_capital_usd=None,
         fee_taker_bps_por_lado=None,
         order_book_provider=None,
+        symbol_info_provider=None,
     ):
         if usuario_id is None:
             raise ValueError("CarteraPaper exige usuario_id")
@@ -87,6 +92,7 @@ class CarteraPaper:
         )
         self._fee_taker_bps_por_lado = fee_taker_bps_por_lado
         self._order_book_provider = order_book_provider
+        self._symbol_info_provider = symbol_info_provider
 
     def _estado(self, *, dia=None):
         """Reconstruye desde el journal; crea el ledger una sola vez si falta."""
@@ -183,12 +189,30 @@ class CarteraPaper:
             raise ValueError("profundidad PAPER no disponible")
         return book
 
+    def _filtros_ejecucion(self, symbol):
+        """Devuelve kwargs de ejecución Binance o vacío en modo legacy aislado."""
+        if self._symbol_info_provider is None:
+            return {}
+        if not callable(self._symbol_info_provider):
+            raise ValueError("PAPER tiene proveedor de filtros invalido")
+        info = self._symbol_info_provider(symbol)
+        filtros = elegibilidad.leer_filtros(info)
+        if filtros is None:
+            raise ValueError(f"PAPER no tiene LOT_SIZE/NOTIONAL validos para {symbol}")
+        return {
+            "step_size": filtros.step_size,
+            "min_qty": filtros.min_qty,
+            "max_qty": filtros.max_qty,
+            "min_notional": filtros.min_notional,
+        }
+
     def ejecutar(self, veredicto, precio, *, trader=None, economics=None) -> ResultadoOrden:
         symbol = veredicto.symbol
         lado = veredicto.side
         try:
             fee_bps = self._fee_bps()
             book = self._obtener_book(symbol)
+            filtros = self._filtros_ejecucion(symbol)
 
             if lado is Lado.COMPRA:
                 aprobado = self._decimal_positivo(
@@ -201,6 +225,7 @@ class CarteraPaper:
                     order_book=book,
                     quote_amount=presupuesto_bruto,
                     fee_taker_bps_por_lado=fee_bps,
+                    **filtros,
                 )
                 requested_quote = float(aprobado)
                 requested_base = None
@@ -213,6 +238,7 @@ class CarteraPaper:
                     order_book=book,
                     base_quantity=base,
                     fee_taker_bps_por_lado=fee_bps,
+                    **filtros,
                 )
                 requested_quote = None
                 requested_base = float(base)
@@ -385,6 +411,7 @@ def construir_cartera(
     paper_initial_capital_usd=None,
     paper_fee_taker_bps_por_lado=None,
     paper_order_book_provider=None,
+    paper_symbol_info_provider=None,
 ):
     if modo_real:
         return CarteraLive(
@@ -404,4 +431,5 @@ def construir_cartera(
                              else paper_initial_capital_usd),
         fee_taker_bps_por_lado=paper_fee_taker_bps_por_lado,
         order_book_provider=paper_order_book_provider,
+        symbol_info_provider=paper_symbol_info_provider,
     )
