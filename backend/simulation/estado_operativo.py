@@ -3,7 +3,7 @@
 No hace red, no escribe DB y no participa en decisiones. Convierte el estado
 contable ya reconstruido y la configuracion canonica en un contrato pequeno y
 explicito para la UI: motor activo, gate de rentabilidad, capital desplegado,
-calidad de la valoracion y disponibilidad de evidencia por estrategia.
+calidad de la valoracion, limites vigentes y evidencia por estrategia.
 """
 from __future__ import annotations
 
@@ -78,6 +78,16 @@ def construir_estado_operativo(*, estado, valoracion_completa: bool,
         "capital_desplegado_usd": desplegado,
         "capital_desplegado_pct": _porcentaje(desplegado, inicial),
         "retorno_realizado_pct": _porcentaje(realizado, inicial),
+        "limites_riesgo": {
+            "asignacion_maxima_por_operacion_pct": (
+                float(settings.LIMITE_ASIGNACION_POR_OPERACION) * 100.0
+            ),
+            "monto_maximo_por_operacion_usd": float(settings.MONTO_MAXIMO_USDT),
+            "perdida_realizada_diaria_maxima_usd": float(settings.MAX_DAILY_LOSS_USDT),
+            "exposicion_total_maxima_usd": float(settings.MAX_EXPOSICION_TOTAL_USDT),
+            "exposicion_por_activo_maxima_usd": float(settings.MAX_EXPOSICION_POR_ACTIVO_USDT),
+            "timezone_dia_riesgo": str(settings.RISK_TIMEZONE),
+        },
         "estrategias_con_cierres": sum(
             1 for fila in estrategias.values()
             if isinstance(fila, dict) and int(fila.get("cierres", 0) or 0) > 0
