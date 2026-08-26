@@ -181,31 +181,8 @@ def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROBUSTEZ · INFORMAR DE UN ERROR NO PUEDE MATAR EL BUCLE
-#
-# Hallazgo de la validacion funcional de BOT 2.0-02A. El manejador de errores
-# del ciclo hacia directamente:
-#
-#     print(f"❌ Error inesperado en ciclo de trading: ...")
-#     traceback.print_exc()
-#
-# Con un stdout que no sabe codificar el emoji -cp1252, que es lo que se
-# obtiene en cuanto la salida se redirige a un fichero o a un pipe- el propio
-# print lanzaba UnicodeEncodeError DENTRO del except y mataba el hilo de
-# trading. Observado: el bot murio en el primer error en lugar de esperar y
-# reintentar.
-#
-# No cambia NADA de lo que se informa, ni el scheduling, ni las decisiones.
-# Solo garantiza que informar no pueda ser lo que tumbe el bot.
 # ─────────────────────────────────────────────────────────────────────────────
 def imprimir_resistente(texto, destino=None):
-    """
-    Imprime `texto` sin que un stdout limitado pueda hacer fallar al llamador.
-
-    Si la codificacion del destino no admite algun caracter, se reintenta en
-    ASCII con escapes: `backslashreplace` conserva el caracter perdido de forma
-    legible (\\u274c) en lugar de borrarlo. Si tampoco se puede, no se imprime.
-    Devuelve si se logro imprimir; nadie deberia necesitar comprobarlo.
-    """
     try:
         print(texto, file=destino)
         return True
@@ -220,17 +197,6 @@ def imprimir_resistente(texto, destino=None):
 
 
 def reportar_error_de_ciclo(e, *, destino_rastro=None):
-    """
-    Deja constancia de una excepcion del ciclo SIN poder matar el bucle.
-
-    Informa lo mismo que antes -clase, mensaje y traceback completo- por un
-    camino que no puede lanzar. `traceback.print_exc()` se sustituye por
-    `format_exception` + impresion resistente porque escribe en el stream por
-    su cuenta y falla por el mismo motivo que el print.
-
-    La excepcion original NO se oculta: si su `__str__` es el que falla, al
-    menos se informa de su TIPO.
-    """
     try:
         detalle = f"{type(e).__name__}: {e}"
     except Exception:
@@ -241,14 +207,13 @@ def reportar_error_de_ciclo(e, *, destino_rastro=None):
         rastro = "".join(traceback.format_exception(type(e), e, e.__traceback__))
     except Exception:
         rastro = f"(no se pudo formatear el traceback de {type(e).__name__})"
-    # El traceback iba a stderr con print_exc(); se conserva ese destino.
     imprimir_resistente(rastro, destino_rastro or sys.stderr)
 
 
 def get_min_notional(symbol, filters_dict):
     symbol_filters = filters_dict.get(symbol)
     if not symbol_filters:
-        return 1.0  # Valor por defecto
+        return 1.0
 
     for f in symbol_filters:
         if f["filterType"] in ["NOTIONAL", "MIN_NOTIONAL"]:
@@ -283,46 +248,17 @@ def _obtener_assets_con_costes(*, medidor=None):
 # Lógica principal del bot
 def trading_loop():
     ciclo = 0
-    EVALUAR_CADA_N_CICLOS = 2  # Puedes ajustar este valor
+    EVALUAR_CADA_N_CICLOS = 2
     noticias_cache = None
     timestamp_cache = None
-    # `filters_dict` ya NO se cachea entre ciclos: se deriva en cada iteracion
-    # del mismo exchange_info que trae get_available_assets, sin coste HTTP
-    # adicional (02B). Antes se pedia aparte -02A midio 2 exchange_info en el
-    # primer ciclo- y luego quedaba congelado para toda la vida del proceso.
 
     while True:
-        # ── Telemetria HTTP del ciclo (Fase BOT 2.0-02A) ─────────────────────
-        # `ciclo_id` es EXCLUSIVAMENTE TELEMETRICO: no sustituye a `ciclo` ni
-        # participa en EVALUAR_CADA_N_CICLOS, las decisiones, el riesgo, las
-        # ordenes ni el scheduling. Existe porque `ciclo` se incrementa en
-        # cinco ramas distintas -varias dentro de un `continue`- y por tanto no
-        # identifica un recorrido. `ciclo` se guarda como `ciclo_num`, solo
-        # como dato diagnostico legacy.
         medidor = MedidorCicloHttp(nuevo_ciclo_id(), ciclo_num=ciclo)
-        # ── PERSISTIR ANTES DE ESPERAR ────────────────────────────────────────
-        # Las salidas tempranas del ciclo hacian `time.sleep(WAIT_TIME)` DENTRO
-        # del try, o sea ANTES del `finally` que vuelca la telemetria. El
-        # `finally` garantizaba que se volcase, pero no que se volcase pronto:
-        # con WAIT_TIME=14400 el dato tardaba 4 horas en aparecer.
-        #
-        # Con 03A "0 elegibles" es un resultado NORMAL del ciclo, asi que ese
-        # retraso dejaba sin observar justo el caso que interesa. Ahora las
-        # ramas solo MARCAN que hay que esperar y el sueno ocurre en el
-        # `finally`, detras del volcado:
-        #
-        #     fin logico del ciclo -> volcar() -> WAIT_TIME -> siguiente
-        #
-        # La cadencia no cambia: cada rama espera exactamente las veces que
-        # esperaba antes -una-, y la salida normal sigue sin esperar.
         esperar_ciclo = False
         resumen_decision_ciclo = None
         try:
-            # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────
             contexto = cargar_contexto_usuario()
 
-            # La ausencia de usuario es un estado normal, no un error (P0-4).
-            # El bot espera y se reincorpora solo en cuanto alguien se registre.
             if contexto.usuario_id is None:
                 print("[BOT] Sin usuarios registrados todavia. "
                       "Esperando a que alguien complete /signup...")
@@ -336,10 +272,6 @@ def trading_loop():
                 decision_engine=settings.DECISION_ENGINE,
             )
 
-            # ── RECONCILIACION antes de operar (P0-14) ───────────────────
-            # Solo en LIVE: en PAPER no existen ordenes de broker. Si queda
-            # alguna sin resolver, el MotorRiesgo bloqueara toda compra al ver
-            # estado.ordenes_pendientes > 0.
             if settings.MODO_REAL:
                 reconciliar_pendientes(real_trader, usuario_id=contexto.usuario_id)
 
@@ -350,7 +282,6 @@ def trading_loop():
             simulator.latest_decisions = {}
             precios_actuales = {}
 
-            # Cachear noticias por 1 hora para evitar exceso de llamadas
             if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
                 noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
                 noticias_cache = noticias if noticias else []
@@ -364,8 +295,6 @@ def trading_loop():
             print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             try:
-                # Reutiliza el MISMO GET /account que ya obtiene balances.
-                # Los adaptadores legacy conservan fee desconocida, nunca cero.
                 (assets_disponibles, balances_reales, symbols_info,
                  costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)
             except Exception as e:
@@ -384,11 +313,10 @@ def trading_loop():
                 ciclo += 1
                 continue
 
-            # Los filtros salen del MISMO exchange_info que acaba de traer
-            # get_available_assets: cero peticiones extra, y ademas se
-            # refrescan cada ciclo en lugar de quedar congelados en el arranque
-            # del proceso (02B). Aqui es la unica vez que se construyen.
+            # El MISMO exchangeInfo del ciclo alimenta elegibilidad, riesgo y
+            # ahora también la ejecución PAPER. No hay una petición adicional.
             filters_dict = {s["symbol"]: s["filters"] for s in symbols_info}
+            info_por_symbol = {s["symbol"]: s for s in symbols_info}
 
             print("🔢 Total activos disponibles:", len(assets_disponibles))
             for a in assets_disponibles[:10]:
@@ -414,22 +342,13 @@ def trading_loop():
                 ciclo += 1
                 continue
 
-            # Este bloque fue movido hacia arriba
+            ciclo += 1
 
-            ciclo += 1  # Aquí avanzamos el ciclo después de haber intentado ejecutar
-
-            # Crear diccionario de saldos reales para acceso rápido. Solo la
-            # CarteraLive los consume; CarteraPaper no tiene parametro por el
-            # que puedan entrar a su estado ni a su contexto para IA.
             saldo_real_dict = {
                 b["asset"]: float(b["free"]) + float(b["locked"])
                 for b in balances_reales
             }
 
-            # ── Unico punto donde se decide el modo (P0-15) ──────────────────
-            # A partir de aqui el bucle no vuelve a preguntar si es PAPER o
-            # LIVE. La cartera activa es tambien la fuente del contexto
-            # financiero que vera el LLM.
             cartera = construir_cartera(
                 modo_real=settings.MODO_REAL,
                 simulador=simulator,
@@ -448,26 +367,19 @@ def trading_loop():
                             "binance", "paper_order_book"),
                     )
                 ),
+                paper_symbol_info_provider=(
+                    None if settings.MODO_REAL else
+                    lambda symbol: info_por_symbol.get(symbol)
+                ),
                 estado_persistente=contexto.estado,
                 ultimos_movimientos=contexto.ultimos_movimientos,
                 ultimos_precios_venta=contexto.ultimos_precios_venta,
             )
             print(f"[CARTERA] modo={cartera.modo} capital={cartera.capital_disponible():.2f} USDT")
 
-            # ── UN SOLO SNAPSHOT DE PRECIOS POR CICLO (02B) ──────────────────
-            # Una peticion REST para todos los simbolos del exchange, reutilizada
-            # por get_multiple_prices y por get_market_pairs. 02A midio 484 +
-            # 1.361 tickers individuales haciendo exactamente este trabajo.
-            #
-            # Efecto lateral deseado: el snapshot es temporalmente COHERENTE
-            # -todos los precios del mismo instante- en vez de 1.845 precios
-            # tomados a lo largo de 7,8 minutos.
             snapshot_precios = binance.get_price_snapshot(
                 medicion=medidor.operacion("binance", "market_price_snapshot"))
 
-            # Metricas de mercado del ciclo: UNA peticion (ticker/24hr completo)
-            # que alimenta al scanner. Reutilizada para los 484 activos; aqui se
-            # paga una vez y no vuelve a haber trafico (03B).
             metricas_mercado = binance.get_market_metrics(
                 medicion=medidor.operacion("binance", "market_metrics"))
 
@@ -478,17 +390,6 @@ def trading_loop():
                 snapshot=snapshot_precios,
                 medicion=medidor.operacion("binance", "get_multiple_prices"))
 
-            # ── ELIGIBILITY GATE (Fase BOT 2.0-03A) ──────────────────────────
-            # Estado y filtros se resuelven UNA vez por ciclo; el resto es
-            # aritmetica pura por activo. El gate solo QUITA candidatos: el
-            # MotorRiesgo sigue siendo la unica autoridad y vuelve a evaluar de
-            # cero cada decision aprobada por el LLM.
-            #
-            # El estado es el del INICIO del ciclo, igual que el que usaria la
-            # primera decision. Si durante el ciclo se libera margen, el gate
-            # habra sido algo mas estricto de lo necesario; nunca al contrario,
-            # y nunca autoriza nada por su cuenta.
-            info_por_symbol = {s["symbol"]: s for s in symbols_info}
             estado_gate = cartera.estado_riesgo()
             capital_gate = cartera.capital_disponible()
             gate = elegibilidad.ResumenElegibilidad(universo=len(activos_evaluar))
@@ -509,19 +410,11 @@ def trading_loop():
 
                 precios_actuales[symbol] = precio
 
-                # Cantidad, coste base y movimientos salen de la MISMA cartera
-                # activa. En PAPER, exclusivamente del ledger persistente;
-                # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.
                 posicion_llm = contexto_posicion_para_llm(cartera, symbol)
                 qty = posicion_llm.cantidad
                 position_detected = qty > 0
                 balance_detected = position_detected
 
-                # ── Puerta de elegibilidad (03A) ──────────────────────────
-                # Una posicion ABIERTA entra SIEMPRE, aunque no fuese elegible
-                # para comprar: el bot nunca puede quedarse sin poder analizar
-                # -y por tanto vender- lo que ya tiene. La elegibilidad es de
-                # COMPRA NUEVA y solo se aplica a quien no tiene posicion.
                 if position_detected:
                     gate.preservar(symbol)
                 else:
@@ -529,8 +422,6 @@ def trading_loop():
                         symbol,
                         symbol_info=info_por_symbol.get(symbol),
                         precio=precio,
-                        # Mismo calculo que usara despues el MotorRiesgo: se le
-                        # pregunta a el, no se replica su formula.
                         max_notional_autorizado=motor_riesgo.limite_compra(
                             capital_disponible=capital_gate,
                             estado=estado_gate,
@@ -555,14 +446,6 @@ def trading_loop():
             if resumen_decision_ciclo is not None:
                 resumen_decision_ciclo.anotar_elegibilidad(gate)
 
-            # ── SCANNER DETERMINISTICO (Fase BOT 2.0-03B) ────────────────────
-            # Recorta los candidatos de COMPRA NUEVA al Top N por score. No
-            # decide, no dimensiona y no autoriza: solo ordena y recorta. Las
-            # posiciones abiertas se conservan intactas para poder analizar su
-            # salida, igual que en 03A.
-            #
-            # Todas las metricas salen de UNA peticion (ticker/24hr completo),
-            # pedida arriba junto al snapshot de precios. Aqui no hay red.
             resumen_scanner = scanner.ResumenScanner()
             inicio_scanner = time.perf_counter()
             activos_para_gpt = scanner.aplicar(
@@ -573,9 +456,6 @@ def trading_loop():
             if resumen_decision_ciclo is not None:
                 resumen_decision_ciclo.anotar_scanner(resumen_scanner)
 
-            # Contrato 05E ya cableado, pero congelado en False hasta que
-            # la evidencia OOS justifique promoverlo. Desactivado no hace
-            # red, no recalcula candidatos y conserva el comportamiento.
             notional_rentabilidad = {}
             if PROFITABILITY_GATE_05E_ENABLED:
                 estado_pre_llm = cartera.estado_riesgo()
@@ -618,9 +498,6 @@ def trading_loop():
             if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:
                 print(pre_llm_05e.resumen.linea())
 
-            # El scanner ya devuelve posiciones abiertas primero. Este sort
-            # conserva explicitamente esa prioridad usando las claves internas
-            # reales, antes de retirarlas del payload del motor de decision.
             activos_para_gpt.sort(key=lambda a: not (
                 a.get("_balance_detected") or a.get("_position_detected")))
 
@@ -633,39 +510,26 @@ def trading_loop():
                 esperar_ciclo = True
                 continue
 
-            # El contexto auxiliar del portafolio y el capital salen de la
-            # cartera ACTIVA. `portafolio_real` era construido siempre desde
-            # balances_reales de Binance, de modo que PAPER podia enviar al LLM
-            # saldos LIVE. La firma del conector se conserva por compatibilidad,
-            # pero su argumento ahora es coherente con el modo.
             portafolio_contexto = portafolio_para_llm(cartera)
             usdt_disponible = cartera.capital_disponible()
 
-            # Mismo snapshot, cero peticiones: se construye en memoria (02B).
             market_pairs = get_market_pairs(symbols_info,
                                             snapshot=snapshot_precios,
                                             medidor=medidor)
 
-            # Enviar a análisis
-            # 🔍 Identificar activos relevantes
             activos_relevantes = {
                 a["symbol"].replace("USDT", "") for a in activos_para_gpt
                 if a["position_quantity"] > 0 or a.get("_balance_detected")
             }
 
-            # 🧹 Filtrar solo pares que involucren activos relevantes
             market_pairs_filtrados = [
                 p for p in market_pairs
                 if any(activo in p["pair"] for activo in activos_relevantes)
             ]
-            # Limpiar campos internos que no se deben enviar al motor.
             for a in activos_para_gpt:
                 a.pop("_balance_detected", None)
                 a.pop("_position_detected", None)
 
-            # Sella el tiempo de PARED consumido ANTES de gastar un solo token.
-            # Es la metrica que explica los ~8 m 10 s del baseline frente a los
-            # 1296 ms que costo la llamada al LLM.
             if settings.DECISION_ENGINE == decision_engine.ENGINE_GPT:
                 medidor.marcar_fase_pre_llm(len(activos_para_gpt))
 
@@ -709,8 +573,6 @@ def trading_loop():
                 decision = resultado.get("decision", "ESPERAR")
                 if resumen_decision_ciclo is not None:
                     resumen_decision_ciclo.anotar_decision(decision)
-                # La cantidad sugerida por el motor se conserva para auditoria.
-                # En COMPRAS no es autoritativa: MotorRiesgo dimensiona de cero.
                 base_quantity = resultado.get("quantity", 0.0)
                 risk_score = resultado.get("risk_score", 0.0)
                 economics = {}
@@ -728,11 +590,6 @@ def trading_loop():
                     continue
 
                 if decision in ("COMPRAR", "VENDER"):
-                    # Economía es TELEMETRÍA, no autoridad. GPT/SAFE siempre
-                    # producen {} por defensa en profundidad. Un futuro motor
-                    # determinista registrado puede aportar strategy + expected
-                    # edge/cost/net; datos inválidos se descartan sin bloquear
-                    # una decisión ni modificar el sizing de MotorRiesgo.
                     economics, diagnostico_economia = (
                         decision_engine.contexto_economico_para_ejecucion(
                             settings.DECISION_ENGINE, resultado)
@@ -758,13 +615,8 @@ def trading_loop():
                                 resumen_decision_ciclo.anotar_rentabilidad_post_bloqueada(motivo_05e)
                             continue
 
-                    # Estado de riesgo FRESCO por decision: la exposicion puede
-                    # cambiar dentro del propio ciclo si se ejecutan varias
-                    # ordenes. Cada cartera sabe cual es SU fuente de verdad.
                     estado_riesgo = cartera.estado_riesgo()
 
-                    # base_quantity viene del motor y NO ES AUTORITATIVA para
-                    # compras: el MotorRiesgo recalcula el tamano desde cero.
                     propuesta = PropuestaOperacion(
                         symbol=symbol, side=lado, precio=precio_actual,
                         base_quantity_modelo=base_quantity,
@@ -784,9 +636,6 @@ def trading_loop():
                                                  noticias=noticias_str)
                         continue
 
-                    # Un unico punto de ejecucion para ambos modos. La cartera
-                    # decide si es un fill PAPER persistido o una orden LIVE.
-                    # `economics` solo acompana la auditoria; no entra al riesgo.
                     ejecucion = cartera.ejecutar(
                         veredicto,
                         precio_actual,
@@ -802,8 +651,6 @@ def trading_loop():
                         print(f"⛔ {decision} {symbol} NO registrada: {ejecucion}")
 
                 elif decision == "ESPERAR":
-                    # Una unica fuente, la de la cartera activa. Antes se
-                    # consultaban a la vez el saldo del broker y el simulador.
                     if cartera.cantidad_disponible(symbol) <= 0:
                         print(f"⛔ ESPERAR ignorado: no hay posicion en {symbol} "
                               f"segun la cartera {cartera.modo}")
@@ -816,10 +663,8 @@ def trading_loop():
                     "symbol": symbol,
                     "action": decision,
                     "price": precio_actual,
-                    # Cantidad propuesta por el motor; es intencion, no fill.
                     "quantity": base_quantity,
                     "timestamp": ahora.astimezone(pytz.timezone("America/Costa_Rica")).strftime("%Y-%m-%d %H:%M:%S"),
-
                     "context": {
                         "sentimiento": sentimiento,
                         "noticias": noticias_str,
@@ -846,30 +691,15 @@ def trading_loop():
                 except Exception as e:
                     print(f"⚠️ Error guardando auditoría de decisión: {e}")
 
-
         except Exception as e:
             if resumen_decision_ciclo is not None:
                 resumen_decision_ciclo.anotar_omision(f"ERROR_CICLO:{type(e).__name__}")
-            # Con solo str(e) el NameError de P0-4 fue invisible 15 meses: se
-            # sigue informando de la clase, el mensaje y el traceback completo.
-            # Lo unico que cambia es que informar ya no puede lanzar y matar el
-            # hilo antes de llegar a la espera (ver reportar_error_de_ciclo).
             reportar_error_de_ciclo(e)
             esperar_ciclo = True
             ciclo += 1
         finally:
-            # El bucle sale de la iteracion por muchas rutas distintas (varios
-            # `continue` y el manejador de excepciones). El `finally` es lo
-            # unico que garantiza que se mida TAMBIEN el ciclo que aborto
-            # pronto, que es precisamente el caso que interesa diagnosticar.
-            #
-            # `volcar` nunca lanza y nada depende de su retorno: si la
-            # persistencia falla, este ciclo termina exactamente igual que sin
-            # telemetria.
             medidor.volcar()
 
-            # La observabilidad de decisiones es audit-only. Un fallo al
-            # persistirla nunca puede cambiar el resultado ni matar el ciclo.
             if resumen_decision_ciclo is not None:
                 try:
                     with SessionLocal() as db:
@@ -879,34 +709,14 @@ def trading_loop():
                         f"[OBSERVABILIDAD] no se pudo persistir ciclo: "
                         f"{type(e).__name__}: {e}")
 
-            # La espera va DESPUES del volcado. No se espera si estamos saliendo
-            # por una excepcion que el bucle no controla (Ctrl-C, cierre del
-            # proceso): dormir 4 horas antes de propagarla dejaria el apagado
-            # colgado. `sys.exc_info()` en un finally solo trae algo cuando hay
-            # una excepcion en vuelo sin manejar.
             if esperar_ciclo and sys.exc_info()[0] is None:
                 time.sleep(settings.WAIT_TIME)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CICLO DE VIDA (P0-13)
-#
-# Importar este modulo NO arranca a operar. El bucle solo se pone en marcha
-# desde el lifespan de FastAPI y unicamente si este proceso gana el candado de
-# liderazgo. Con --reload o --workers N, solo uno opera; los demas lo registran
-# y se quedan sirviendo la API.
 # ─────────────────────────────────────────────────────────────────────────────
 def _precondicion_esquema():
-    """
-    El bucle NO arranca si el esquema no esta alineado con las migraciones.
-
-    Fallo cerrado: operar contra una base cuyo esquema no conocemos podria
-    escribir transacciones u ordenes en tablas que no existen o que tienen otra
-    forma. Con MODO_REAL=True eso significaria dinero real sobre un ledger que
-    no podemos garantizar. La API si arranca, para permitir diagnostico.
-
-    Esta comprobacion SOLO LEE: nunca aplica una migracion.
-    """
     from backend.esquema import ALINEADO, estado_esquema
 
     e = estado_esquema()
@@ -928,14 +738,12 @@ coordinador = CoordinadorTrading(
 
 @app.get("/health")
 def health():
-    """Permite ver desde fuera quien es el lider y por que no opera un proceso."""
     return {
         "trading_mode": settings.TRADING_MODE,
         "modo_real": settings.MODO_REAL,
         "bucle_activo": coordinador.activo,
         "es_lider": coordinador.es_lider,
         "motivo_inactivo": coordinador.motivo_inactivo or None,
-        # Solo INFORMA. La app nunca migra por su cuenta (P0-16).
         "esquema": _estado_esquema_serializado(),
     }
 
@@ -959,7 +767,6 @@ def get_historial(
     historial = []
 
     for a in auditorias:
-        # Ignorar ESPERAR si no hay cantidad
         if a.action == "ESPERAR" and (not a.quantity or a.quantity == 0):
             continue
 
@@ -1000,17 +807,10 @@ def resumen_portafolio(
     valor_total = 0.0
     pnl_total = None
     pnl_total_conocido = True
-    # En PAPER el saldo del exchange no pertenece al libro simulado, asi que no
-    # tiene coste base publicable aqui. No se inventa cero.
     motivo_sin_coste = (None if settings.MODO_REAL else
                         "en PAPER el saldo del exchange no tiene coste base en "
                         "el libro simulado")
 
-    # Coste base leido de la BD, de la MISMA fuente que usa el bot, para que
-    # el resumen y las decisiones nunca discrepen.
-    # NOTA: el balance de Binance es de una unica cuenta compartida, asi que
-    # este endpoint es inherentemente monousuario. La separacion por usuario
-    # sigue pendiente (ver riesgo A-4 de la auditoria).
     estado = cargar_contexto_usuario().estado
 
     for b in balances:
@@ -1020,7 +820,6 @@ def resumen_portafolio(
         if total == 0:
             continue
 
-        # Corrección: manejo especial para USDT
         if asset == "USDT":
             precio_actual = 1.0
             symbol = "USDT"
@@ -1032,8 +831,6 @@ def resumen_portafolio(
                 print(f"❌ No se pudo obtener precio para {symbol}: {e}")
                 continue
 
-        # Precio medio y P&L solo si hay coste base registrado. Sin el no hay
-        # P&L: no es cero (Fase 6).
         medio = precio_medio_de(estado, symbol)
         motivo = motivo_sin_coste or (None if medio is not None
                                       else f"sin coste base registrado para {symbol}")
@@ -1053,14 +850,10 @@ def resumen_portafolio(
         else:
             pnl_total = (pnl_total or 0.0) + pnl
 
-    # Mostrar USDT primero
     resumen.sort(key=lambda x: 0 if x["symbol"] == "USDT" else 1)
 
     salida = {"modo": settings.TRADING_MODE, "resumen": resumen,
               "valor_total_usd": round(valor_total, 2)}
-    # El campo antiguo se llamaba `ganancia_total` pero sumaba el VALOR de la
-    # cartera, no una ganancia. Se publica con su nombre correcto y el P&L real
-    # se expone aparte, con su estado.
     salida.update(campos("pnl_total", pnl_total if pnl_total_conocido else None,
                          redondeo=2,
                          motivo="al menos un activo carece de coste base"))
@@ -1079,7 +872,7 @@ def login(form_data: dict = Body(...), db: Session = Depends(get_db)):
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "nombre": user.nombre  # ✅ esto asume que ya tienes el campo `nombre` en el modelo
+        "nombre": user.nombre
     }
 
 @app.post("/signup")
@@ -1097,9 +890,4 @@ def signup(form_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(nuevo_usuario)
 
-    # Ya no se arranca ningun hilo aqui. El bucle corre siempre y detecta al
-    # nuevo usuario por si mismo en la siguiente iteracion, leyendo la BD.
-    # Antes, este arranque tardio dejaba sin definir estado/ultimos_* y el
-    # bucle moria con NameError en cada ciclo (P0-4). Ademas, dos altas
-    # simultaneas podian lanzar dos hilos de trading a la vez.
     return {"mensaje": "Usuario creado correctamente", "usuario_id": nuevo_usuario.id}
