@@ -4,7 +4,7 @@ set -euo pipefail
 # Arranque backend production-like desde la raiz real del repositorio.
 #
 # - un solo worker: evita multiplicar procesos de trading;
-# - sin --reload: no respawnea el proceso operativo;
+# - sin recarga automatica: no respawnea el proceso operativo;
 # - no aplica migraciones automaticamente: Alembic sigue siendo una operacion
 #   explicita de despliegue (`alembic upgrade head`);
 # - PORT puede ser inyectado por cualquier plataforma; local usa 8000.
