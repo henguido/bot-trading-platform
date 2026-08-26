@@ -12,6 +12,7 @@ import pytz
 from backend.app import models
 from backend.economia.estadisticas_paper import resumen_por_estrategia
 from backend.finanzas import campos, pnl_no_realizado
+from backend.simulation.estado_operativo import construir_estado_operativo
 from backend.simulation.paper_ledger import operaciones_desde_db, reconstruir_paper
 
 _TZ_CR = pytz.timezone("America/Costa_Rica")
@@ -172,6 +173,11 @@ def resumen_paper(
         if pnl_no_realizado_conocido else None
     )
     posiciones_abiertas = len(estado.posiciones)
+    estado_operativo = construir_estado_operativo(
+        estado=estado,
+        valoracion_completa=valor_total_conocido,
+        estrategias_paper=economia_estrategias,
+    )
 
     salida = {
         "modo": "PAPER",
@@ -198,6 +204,7 @@ def resumen_paper(
         "operaciones": int(estado.operaciones),
         "posiciones_abiertas": posiciones_abiertas,
         "estrategias_paper": economia_estrategias,
+        "estado_operativo": estado_operativo,
     }
     salida.update(campos(
         "pnl_total",
