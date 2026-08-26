@@ -611,9 +611,9 @@ def test_16c_el_orden_en_el_bucle_es_gate_y_luego_scanner():
     fuente = MAIN.read_text(encoding="utf-8")
     pos_gate = fuente.index("gate.linea(")
     pos_scanner = fuente.index("scanner.aplicar(")
-    pos_llm = fuente.index("openai.analyze_multiple_assets(")
-    assert pos_gate < pos_scanner < pos_llm, (
-        "la cadena debe ser Eligibility Gate -> scanner -> LLM")
+    pos_decision = fuente.index("decision_engine.decidir(")
+    assert pos_gate < pos_scanner < pos_decision, (
+        "la cadena debe ser Eligibility Gate -> scanner -> motor de decision")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
