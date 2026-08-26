@@ -644,9 +644,19 @@ def test_18_import_safety_intacto(monkeypatch):
 
 
 def test_18b_el_scanner_no_necesita_migracion():
-    from backend.esquema import revision_esperada
-    assert revision_esperada() == "0005_telemetria_http"
-    assert not list((RAIZ / "migrations" / "versions").glob("0006*"))
+    """La migracion posterior a 03B pertenece al ledger PAPER, no al scanner."""
+    migracion_paper = RAIZ / "migrations" / "versions" / "0006_paper_ledger.py"
+    assert migracion_paper.exists()
+    texto = migracion_paper.read_text(encoding="utf-8").lower()
+    assert "paper" in texto
+    assert "scanner" not in texto
+
+    arbol = ast.parse(SCANNER.read_text(encoding="utf-8"))
+    importados = "\n".join(ast.dump(n) for n in ast.walk(arbol)
+                            if isinstance(n, (ast.Import, ast.ImportFrom)))
+    for prohibido in ("alembic", "sqlalchemy", "database", "models"):
+        assert prohibido not in importados.lower(), \
+            f"el scanner no debe necesitar persistencia ({prohibido})"
 
 
 def test_18c_el_scheduling_no_cambia():
