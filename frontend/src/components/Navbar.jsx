@@ -5,9 +5,9 @@ function Navbar() {
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
 
-  // Dashboard e historial tienen cabecera operativa propia. Evita dos barras
+  // Las consolas de trabajo tienen cabecera operativa propia. Evita dos barras
   // apiladas y mantiene las pantallas de trabajo con mas espacio util.
-  if (location.pathname === "/dashboard" || location.pathname === "/historial") {
+  if (["/dashboard", "/historial", "/observabilidad"].includes(location.pathname)) {
     return null;
   }
 
@@ -44,6 +44,12 @@ function Navbar() {
                 className="rounded-lg px-3 py-2 text-slate-400 transition hover:bg-slate-900 hover:text-slate-100"
               >
                 Journal
+              </Link>
+              <Link
+                to="/observabilidad"
+                className="rounded-lg px-3 py-2 text-slate-400 transition hover:bg-slate-900 hover:text-slate-100"
+              >
+                Observabilidad
               </Link>
               <button
                 onClick={handleLogout}
