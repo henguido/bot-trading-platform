@@ -1,8 +1,12 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import backend.economia.integracion_05e as integ
+
+
+RAIZ = Path(__file__).resolve().parents[1]
 
 
 class BinanceQueNoDebeUsarse:
@@ -99,3 +103,18 @@ def test_post_llm_activo_exige_rentabilidad_apta():
     )
     assert permitido is True
     assert motivo == "RENTABILIDAD_APTA"
+
+
+def test_main_cablea_05e_en_orden_y_lo_mantiene_desactivado():
+    """El adaptador queda listo sin promover una metodologia no validada."""
+    main = (RAIZ / "backend" / "main.py").read_text(encoding="utf-8")
+
+    scanner_pos = main.index("activos_para_gpt = scanner.aplicar(")
+    pre_pos = main.index("pre_llm_05e = aplicar_pre_llm_05e(")
+    llm_pos = main.index("resultados, explicacion_gpt = openai.analyze_multiple_assets(")
+    post_pos = main.index("permitida_05e, motivo_05e = compra_post_llm_permitida_05e(")
+    riesgo_pos = main.index("veredicto = motor_riesgo.evaluar(")
+
+    assert scanner_pos < pre_pos < llm_pos < post_pos < riesgo_pos
+    assert integ.PROFITABILITY_GATE_05E_ENABLED is False
+    assert "enabled=PROFITABILITY_GATE_05E_ENABLED" in main
