@@ -14,6 +14,8 @@ from backend.finanzas import campos, pnl_no_realizado
 from backend.simulation.paper_ledger import estado_desde_db, reconstruir_paper
 
 _TZ_CR = pytz.timezone("America/Costa_Rica")
+_METODO_PNL_ABIERTO = "MTM_INCLUYE_COSTE_ENTRADA_NO_COSTE_SALIDA"
+_METODO_PNL_REALIZADO = "NETO_DE_FEES_DE_FILLS_REALIZADOS"
 
 
 def _ledger_usuario(db, usuario_id: int):
@@ -92,7 +94,8 @@ def resumen_paper(
 
     El coste medio de una posición incluye la fee de entrada porque así se
     reconstruye el ledger. El P&L realizado ya incluye fees de entrada/salida.
-    El P&L no realizado todavía no descuenta una hipotética fee de salida.
+    El P&L no realizado todavía no descuenta una hipotética fee/slippage de
+    salida, por lo que la API lo etiqueta como MTM pre-coste de salida.
     """
     ledger = _ledger_usuario(db, usuario_id)
     if ledger is None:
@@ -107,6 +110,7 @@ def resumen_paper(
         "cantidad": round(capital, 6),
         "precio_actual": 1.0,
         "valor_actual": round(capital, 2),
+        "pnl_metodologia": "CAJA",
     }
     fila_cash.update(campos("average_price", 1.0, redondeo=6))
     fila_cash.update(campos("pnl", 0.0, redondeo=2))
@@ -150,6 +154,7 @@ def resumen_paper(
             "valor_actual": (
                 None if valor_actual is None else round(valor_actual, 2)
             ),
+            "pnl_metodologia": _METODO_PNL_ABIERTO,
         }
         fila.update(campos("average_price", medio, redondeo=6))
         fila.update(campos("pnl", pnl, redondeo=2, motivo=motivo))
@@ -160,6 +165,7 @@ def resumen_paper(
         pnl_realizado + pnl_no_realizado_total
         if pnl_no_realizado_conocido else None
     )
+    posiciones_abiertas = len(estado.posiciones)
 
     salida = {
         "modo": "PAPER",
@@ -170,15 +176,21 @@ def resumen_paper(
         "valor_total_usd_status": (
             "DISPONIBLE" if valor_total_conocido else "NO_DISPONIBLE"
         ),
+        "valor_total_usd_metodologia": "CAJA_MAS_MTM_PRE_COSTE_SALIDA",
         "capital_disponible_usd": round(capital, 6),
         "initial_capital_usd": float(estado.initial_capital_usd),
         "pnl_realizado_usd": round(pnl_realizado, 6),
+        "pnl_realizado_metodologia": _METODO_PNL_REALIZADO,
         "pnl_no_realizado_usd": (
             round(pnl_no_realizado_total, 6)
             if pnl_no_realizado_conocido else None
         ),
+        "pnl_no_realizado_metodologia": _METODO_PNL_ABIERTO,
+        "pnl_total_metodologia": "REALIZADO_NETO_MAS_MTM_PRE_COSTE_SALIDA",
+        "pnl_total_es_neto_liquidacion": posiciones_abiertas == 0,
         "fees_total_usd": round(float(estado.fees_total_usd), 6),
         "operaciones": int(estado.operaciones),
+        "posiciones_abiertas": posiciones_abiertas,
     }
     salida.update(campos(
         "pnl_total",
