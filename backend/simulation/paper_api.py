@@ -10,8 +10,9 @@ from typing import Callable, Optional
 import pytz
 
 from backend.app import models
+from backend.economia.estadisticas_paper import resumen_por_estrategia
 from backend.finanzas import campos, pnl_no_realizado
-from backend.simulation.paper_ledger import estado_desde_db, reconstruir_paper
+from backend.simulation.paper_ledger import operaciones_desde_db, reconstruir_paper
 
 _TZ_CR = pytz.timezone("America/Costa_Rica")
 _METODO_PNL_ABIERTO = "MTM_INCLUYE_COSTE_ENTRADA_NO_COSTE_SALIDA"
@@ -50,7 +51,6 @@ def historial_paper(db, *, usuario_id: int):
     for op in operaciones:
         action = "COMPRAR" if op.side == "BUY" else "VENDER"
         salida.append({
-            # Campos legacy que consume la UI actual.
             "symbol": op.symbol,
             "action": action,
             "quantity": float(op.base_quantity),
@@ -64,7 +64,6 @@ def historial_paper(db, *, usuario_id: int):
             },
             "decision_gpt": None,
             "risk_score": None,
-            # Evidencia económica del fill PAPER.
             "paper_operation_id": op.id,
             "side": op.side,
             "reference_price": float(op.reference_price),
@@ -90,18 +89,25 @@ def resumen_paper(
     initial_capital_usd: float,
     obtener_precio: Callable[[str], Optional[float]],
 ):
-    """Marca a mercado el ledger PAPER sin consultar balances de cuenta.
+    """Marca a mercado el ledger PAPER y atribuye resultados por estrategia.
 
     El coste medio de una posición incluye la fee de entrada porque así se
     reconstruye el ledger. El P&L realizado ya incluye fees de entrada/salida.
     El P&L no realizado todavía no descuenta una hipotética fee/slippage de
     salida, por lo que la API lo etiqueta como MTM pre-coste de salida.
+
+    La atribución por estrategia reutiliza las mismas filas del journal que ya
+    se leen para reconstruir la cartera; no añade red ni otra consulta al broker.
     """
     ledger = _ledger_usuario(db, usuario_id)
     if ledger is None:
-        estado = reconstruir_paper(initial_capital_usd, ())
+        operaciones = ()
+        estado = reconstruir_paper(initial_capital_usd, operaciones)
     else:
-        estado = estado_desde_db(db, ledger)
+        operaciones = operaciones_desde_db(db, ledger)
+        estado = reconstruir_paper(ledger.initial_capital_usd, operaciones)
+
+    economia_estrategias = resumen_por_estrategia(operaciones)
 
     resumen = []
     capital = float(estado.capital_usd)
@@ -191,6 +197,7 @@ def resumen_paper(
         "fees_total_usd": round(float(estado.fees_total_usd), 6),
         "operaciones": int(estado.operaciones),
         "posiciones_abiertas": posiciones_abiertas,
+        "estrategias_paper": economia_estrategias,
     }
     salida.update(campos(
         "pnl_total",
