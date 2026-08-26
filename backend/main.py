@@ -48,6 +48,9 @@ from backend.portafolio.carteras import (
 from backend.coordinador import CoordinadorTrading, candado_por_defecto
 from backend.reconciliacion import reconciliar_pendientes
 from backend.telemetria_http import MedidorCicloHttp, nuevo_ciclo_id
+from backend.observabilidad.ciclos import (
+    ResumenCicloDecision, persistir_resumen_ciclo,
+)
 from contextlib import asynccontextmanager
 import sys
 import time
@@ -313,6 +316,7 @@ def trading_loop():
         # La cadencia no cambia: cada rama espera exactamente las veces que
         # esperaba antes -una-, y la salida normal sigue sin esperar.
         esperar_ciclo = False
+        resumen_decision_ciclo = None
         try:
             # ── Contexto FRESCO en cada iteracion (P0-5) ──────────────────
             contexto = cargar_contexto_usuario()
@@ -324,6 +328,13 @@ def trading_loop():
                       "Esperando a que alguien complete /signup...")
                 esperar_ciclo = True
                 continue
+
+            resumen_decision_ciclo = ResumenCicloDecision(
+                ciclo_id=medidor.ciclo_id,
+                usuario_id=contexto.usuario_id,
+                modo="LIVE" if settings.MODO_REAL else "PAPER",
+                decision_engine=settings.DECISION_ENGINE,
+            )
 
             # ── RECONCILIACION antes de operar (P0-14) ───────────────────
             # Solo en LIVE: en PAPER no existen ordenes de broker. Si queda
@@ -359,12 +370,16 @@ def trading_loop():
                  costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)
             except Exception as e:
                 print(f"❌ Error al inicializar Binance o traer datos: {e}")
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_omision("DATOS_BINANCE_NO_DISPONIBLES")
                 esperar_ciclo = True
                 ciclo += 1
                 continue
 
             if not assets_disponibles:
                 print("⚠️ No se encontraron activos disponibles.")
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_omision("SIN_ACTIVOS_DISPONIBLES")
                 esperar_ciclo = True
                 ciclo += 1
                 continue
@@ -393,6 +408,8 @@ def trading_loop():
 
             if not activos_evaluar:
                 print("⌛ Esperando el siguiente ciclo válido...")
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_omision("FUERA_DE_CADENCIA")
                 esperar_ciclo = True
                 ciclo += 1
                 continue
@@ -535,6 +552,8 @@ def trading_loop():
                 })
 
             print(gate.linea(int((time.perf_counter() - inicio_gate) * 1000)))
+            if resumen_decision_ciclo is not None:
+                resumen_decision_ciclo.anotar_elegibilidad(gate)
 
             # ── SCANNER DETERMINISTICO (Fase BOT 2.0-03B) ────────────────────
             # Recorta los candidatos de COMPRA NUEVA al Top N por score. No
@@ -551,6 +570,8 @@ def trading_loop():
                 top_n=scanner.TOP_N_POR_DEFECTO, resumen=resumen_scanner)
             print(resumen_scanner.linea(
                 int((time.perf_counter() - inicio_scanner) * 1000), requests=0))
+            if resumen_decision_ciclo is not None:
+                resumen_decision_ciclo.anotar_scanner(resumen_scanner)
 
             # Contrato 05E ya cableado, pero congelado en False hasta que
             # la evidencia OOS justifique promoverlo. Desactivado no hace
@@ -573,6 +594,7 @@ def trading_loop():
                     if limite.quote_permitido and limite.quote_permitido > 0:
                         notional_rentabilidad[sym] = limite.quote_permitido
 
+            n_antes_05e = len(activos_para_gpt)
             pre_llm_05e = aplicar_pre_llm_05e(
                 activos_para_gpt,
                 metricas_mercado,
@@ -586,6 +608,13 @@ def trading_loop():
             )
             activos_para_gpt = list(pre_llm_05e.activos)
             evaluaciones_rentabilidad_05e = pre_llm_05e.evaluaciones
+            if resumen_decision_ciclo is not None:
+                resumen_decision_ciclo.anotar_rentabilidad_pre(
+                    antes=n_antes_05e,
+                    despues=len(activos_para_gpt),
+                    aplicado=pre_llm_05e.aplicado,
+                    motivo=pre_llm_05e.motivo,
+                )
             if pre_llm_05e.aplicado and pre_llm_05e.resumen is not None:
                 print(pre_llm_05e.resumen.linea())
 
@@ -595,6 +624,8 @@ def trading_loop():
 
             if not activos_para_gpt:
                 print("⚠️ No hay activos para analizar con GPT")
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_omision("SIN_CANDIDATOS_MOTOR")
                 esperar_ciclo = True
                 continue
 
@@ -648,6 +679,8 @@ def trading_loop():
             )
 
             if not resultados:
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_omision("MOTOR_SIN_RESULTADOS")
                 print("⚠️ GPT no devolvió JSON válido. Respuesta completa:")
                 print(explicacion_gpt)
                 simulator.audit_log.append({
@@ -670,16 +703,22 @@ def trading_loop():
             for resultado in resultados:
                 symbol = resultado.get("symbol")
                 decision = resultado.get("decision", "ESPERAR")
+                if resumen_decision_ciclo is not None:
+                    resumen_decision_ciclo.anotar_decision(decision)
                 # GPT devuelve la cantidad en ACTIVO BASE (BTC en BTCUSDT).
                 base_quantity = resultado.get("quantity", 0.0)
                 risk_score = resultado.get("risk_score", 0.0)
 
                 if not symbol:
+                    if resumen_decision_ciclo is not None:
+                        resumen_decision_ciclo.anotar_omision("RESULTADO_SIN_SYMBOL")
                     continue
 
                 precio_actual = precios_actuales.get(symbol)
                 if precio_actual is None:
                     print(f"⚠️ Precio no disponible para {symbol}. Se omite.")
+                    if resumen_decision_ciclo is not None:
+                        resumen_decision_ciclo.anotar_omision("PRECIO_NO_DISPONIBLE")
                     continue
 
                 if decision in ("COMPRAR", "VENDER"):
@@ -692,6 +731,8 @@ def trading_loop():
                         )
                         if not permitida_05e:
                             print(f"[RENTABILIDAD-05E] {symbol} bloqueada: {motivo_05e}")
+                            if resumen_decision_ciclo is not None:
+                                resumen_decision_ciclo.anotar_rentabilidad_post_bloqueada(motivo_05e)
                             continue
 
                     # Estado de riesgo FRESCO por decision: la exposicion puede
@@ -711,6 +752,8 @@ def trading_loop():
                         capital_disponible=cartera.capital_disponible(),
                         estado=estado_riesgo,
                     )
+                    if resumen_decision_ciclo is not None:
+                        resumen_decision_ciclo.anotar_riesgo(veredicto)
 
                     if not veredicto.aprobado:
                         print(f"⛔ {veredicto}")
@@ -723,6 +766,11 @@ def trading_loop():
                     # persistida tras confirmacion del broker.
                     ejecucion = cartera.ejecutar(veredicto, precio_actual,
                                                  trader=real_trader)
+                    if resumen_decision_ciclo is not None:
+                        resumen_decision_ciclo.anotar_ejecucion(
+                            success=bool(ejecucion.success),
+                            motivo=None if ejecucion.success else type(ejecucion).__name__,
+                        )
                     if not ejecucion.success:
                         print(f"⛔ {decision} {symbol} NO registrada: {ejecucion}")
 
@@ -732,6 +780,8 @@ def trading_loop():
                     if cartera.cantidad_disponible(symbol) <= 0:
                         print(f"⛔ ESPERAR ignorado: no hay posicion en {symbol} "
                               f"segun la cartera {cartera.modo}")
+                        if resumen_decision_ciclo is not None:
+                            resumen_decision_ciclo.anotar_omision("ESPERAR_SIN_POSICION")
                         continue
 
                 simulator.latest_decisions[symbol] = decision
@@ -771,6 +821,8 @@ def trading_loop():
 
 
         except Exception as e:
+            if resumen_decision_ciclo is not None:
+                resumen_decision_ciclo.anotar_omision(f"ERROR_CICLO:{type(e).__name__}")
             # Con solo str(e) el NameError de P0-4 fue invisible 15 meses: se
             # sigue informando de la clase, el mensaje y el traceback completo.
             # Lo unico que cambia es que informar ya no puede lanzar y matar el
@@ -788,6 +840,17 @@ def trading_loop():
             # persistencia falla, este ciclo termina exactamente igual que sin
             # telemetria.
             medidor.volcar()
+
+            # La observabilidad de decisiones es audit-only. Un fallo al
+            # persistirla nunca puede cambiar el resultado ni matar el ciclo.
+            if resumen_decision_ciclo is not None:
+                try:
+                    with SessionLocal() as db:
+                        persistir_resumen_ciclo(db, resumen_decision_ciclo)
+                except Exception as e:
+                    imprimir_resistente(
+                        f"[OBSERVABILIDAD] no se pudo persistir ciclo: "
+                        f"{type(e).__name__}: {e}")
 
             # La espera va DESPUES del volcado. No se espera si estamos saliendo
             # por una excepcion que el bucle no controla (Ctrl-C, cierre del
