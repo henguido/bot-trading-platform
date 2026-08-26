@@ -93,6 +93,7 @@ def test_resumen_sin_ledger_es_lectura_pura_y_muestra_capital_inicial(fabrica):
         "cantidad": 500.0,
         "precio_actual": 1.0,
         "valor_actual": 500.0,
+        "pnl_metodologia": "CAJA",
         "average_price": 1.0,
         "average_price_status": "DISPONIBLE",
         "pnl": 0.0,
