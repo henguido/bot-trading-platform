@@ -99,9 +99,9 @@ def contexto_economico_para_ejecucion(engine: str, resultado: dict) -> tuple[dic
     - un motor no registrado tampoco puede introducirla;
     - para un motor determinista registrado, los valores se normalizan y los
       desconocidos siguen ausentes;
-    - si la telemetría económica es inválida, se devuelve `{}` + diagnóstico.
-      Un error de observabilidad no cambia una decisión ya tomada ni el sizing
-      de MotorRiesgo.
+    - si la telemetría económica es inválida, se devuelve `{}` y el código
+      estable `ECONOMIA_INVALIDA`. Un error de observabilidad no cambia una
+      decisión ya tomada ni el sizing de MotorRiesgo.
 
     Cuando se incorpore un motor determinista validado, bastará con declararlo
     en ENGINES_VALIDOS y hacer que `decidir` devuelva sus campos económicos.
@@ -113,8 +113,8 @@ def contexto_economico_para_ejecucion(engine: str, resultado: dict) -> tuple[dic
         return {}, "MOTOR_ECONOMICO_NO_CONFIABLE"
     try:
         return contexto_economico_de(resultado), None
-    except ValueError as exc:
-        return {}, f"ECONOMIA_INVALIDA:{exc}"
+    except ValueError:
+        return {}, "ECONOMIA_INVALIDA"
 
 
 def decidir(
