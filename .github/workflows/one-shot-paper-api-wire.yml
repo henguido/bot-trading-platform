@@ -1,0 +1,96 @@
+name: one-shot-paper-api-wire
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+    paths:
+      - .github/workflows/one-shot-paper-api-wire.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+      - name: Wire PAPER API reads
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/main.py')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {n}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              'from backend.economia.profundidad import obtener_order_book\n',
+              'from backend.economia.profundidad import obtener_order_book\n'
+              'from backend.simulation.paper_api import historial_paper, resumen_paper\n',
+              'import paper api',
+          )
+
+          old_hist = '\n'.join([
+              'def get_historial(',
+              '    db: Session = Depends(get_db),',
+              '    current_user: models.User = Depends(get_current_user),',
+              '):',
+              '    auditorias = db.query(models.DecisionAudit).order_by(models.DecisionAudit.timestamp.desc()).all()',
+          ])
+          new_hist = '\n'.join([
+              'def get_historial(',
+              '    db: Session = Depends(get_db),',
+              '    current_user: models.User = Depends(get_current_user),',
+              '):',
+              '    if not settings.MODO_REAL:',
+              '        return historial_paper(db, usuario_id=current_user.id)',
+              '',
+              '    auditorias = db.query(models.DecisionAudit).order_by(models.DecisionAudit.timestamp.desc()).all()',
+          ])
+          replace_once(old_hist, new_hist, 'historial PAPER')
+
+          old_resumen = '\n'.join([
+              '@app.get("/api/resumen")',
+              'def resumen_portafolio(current_user: models.User = Depends(get_current_user)):',
+              '    balances = binance.get_account_balance()',
+          ])
+          new_resumen = '\n'.join([
+              '@app.get("/api/resumen")',
+              'def resumen_portafolio(',
+              '    db: Session = Depends(get_db),',
+              '    current_user: models.User = Depends(get_current_user),',
+              '):',
+              '    if not settings.MODO_REAL:',
+              '        return resumen_paper(',
+              '            db,',
+              '            usuario_id=current_user.id,',
+              '            initial_capital_usd=settings.INITIAL_CAPITAL_USD,',
+              '            obtener_precio=binance.get_current_price,',
+              '        )',
+              '',
+              '    balances = binance.get_account_balance()',
+          ])
+          replace_once(old_resumen, new_resumen, 'resumen PAPER')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Self-remove helper and commit
+        shell: bash
+        run: |
+          rm .github/workflows/one-shot-paper-api-wire.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/main.py .github/workflows/one-shot-paper-api-wire.yml
+          git diff --cached --check
+          git commit -m "feat(paper): sirve resumen e historial desde el ledger"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
