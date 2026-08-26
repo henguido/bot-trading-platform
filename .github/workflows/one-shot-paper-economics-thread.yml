@@ -1,0 +1,62 @@
+name: one-shot-paper-economics-thread
+on:
+  push:
+    branches: [agent/bot-2.0-05a-profitability-paper]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+      - name: Patch PAPER economics thread
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"pattern not found in {path}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace(
+              "backend/portafolio/carteras.py",
+              "def ejecutar(self, veredicto, precio, *, trader=None) -> ResultadoOrden:",
+              "def ejecutar(self, veredicto, precio, *, trader=None, economics=None) -> ResultadoOrden:",
+          )
+          replace(
+              "backend/portafolio/carteras.py",
+              '''                registrar_fill(\n                    db,\n                    ledger=ledger,\n                    symbol=symbol,\n                    reference_price=precio,\n                    fill=fill,\n                )''',
+              '''                economics = economics if isinstance(economics, dict) else {}\n                registrar_fill(\n                    db,\n                    ledger=ledger,\n                    symbol=symbol,\n                    reference_price=precio,\n                    fill=fill,\n                    strategy=economics.get("strategy"),\n                    expected_edge_bps=economics.get("expected_edge_bps"),\n                    expected_cost_bps=economics.get("expected_cost_bps"),\n                    expected_net_bps=economics.get("expected_net_bps"),\n                )''',
+          )
+          replace(
+              "backend/portafolio/carteras.py",
+              "def ejecutar(self, veredicto, precio, *, trader) -> ResultadoOrden:",
+              "def ejecutar(self, veredicto, precio, *, trader, economics=None) -> ResultadoOrden:",
+          )
+          replace(
+              "backend/main.py",
+              'activos_para_gpt.sort(key=lambda a: not (a.get("balance_detected") or a.get("position_detected")))',
+              'activos_para_gpt.sort(key=lambda a: not (a.get("_balance_detected") or a.get("_position_detected")))',
+          )
+          replace(
+              "backend/main.py",
+              '''                    ejecucion = cartera.ejecutar(veredicto, precio_actual,\n                                                 trader=real_trader)''',
+              '''                    economics = {\n                        "strategy": resultado.get("strategy"),\n                        "expected_edge_bps": resultado.get("expected_edge_bps"),\n                        "expected_cost_bps": resultado.get("expected_cost_bps"),\n                        "expected_net_bps": resultado.get("expected_net_bps"),\n                    }\n                    if lado is Lado.COMPRA:\n                        info_05e = evaluaciones_rentabilidad_05e.get(symbol)\n                        rent_05e = (info_05e.get("rentabilidad")\n                                    if isinstance(info_05e, dict) else None)\n                        if rent_05e is not None:\n                            economics["strategy"] = economics["strategy"] or "05A"\n                            economics["expected_edge_bps"] = (\n                                economics["expected_edge_bps"]\n                                if economics["expected_edge_bps"] is not None\n                                else rent_05e.edge_bruto_bps)\n                            economics["expected_cost_bps"] = (\n                                economics["expected_cost_bps"]\n                                if economics["expected_cost_bps"] is not None\n                                else rent_05e.coste_total_bps)\n                            economics["expected_net_bps"] = (\n                                economics["expected_net_bps"]\n                                if economics["expected_net_bps"] is not None\n                                else rent_05e.edge_neto_bps)\n                    economics = {k: v for k, v in economics.items() if v is not None}\n                    ejecucion = cartera.ejecutar(\n                        veredicto, precio_actual, trader=real_trader, economics=economics)''',
+          )
+
+          Path("tests/test_paper_economics_thread.py").write_text('''from sqlalchemy import create_engine\nfrom sqlalchemy.orm import sessionmaker\nfrom sqlalchemy.pool import StaticPool\n\nfrom backend.app import models\nfrom backend.app.services.ordenes import Lado\nfrom backend.portafolio.carteras import CarteraPaper\nfrom backend.risk.motor import DecisionRiesgo\n\n\ndef test_fill_paper_persiste_metadatos_economicos():\n    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)\n    models.Base.metadata.create_all(bind=engine)\n    fabrica = sessionmaker(autocommit=False, autoflush=False, bind=engine)\n    try:\n        with fabrica() as db:\n            u = models.User(nombre="econ", email="econ@test.local", password_hash="x")\n            db.add(u); db.commit(); db.refresh(u); uid = u.id\n        cartera = CarteraPaper(\n            usuario_id=uid, session_factory=fabrica, initial_capital_usd=500.0,\n            fee_taker_bps_por_lado=10.0,\n            order_book_provider=lambda _s: {"asks": [["100", "1"]], "bids": [["99", "1"]]},\n        )\n        v = DecisionRiesgo(aprobado=True, symbol="BTCUSDT", side=Lado.COMPRA, approved_quote_amount=10.0)\n        r = cartera.ejecutar(v, 100.0, economics={\n            "strategy": "SCANNER_DETERMINISTA",\n            "expected_edge_bps": 42.0,\n            "expected_cost_bps": 18.0,\n            "expected_net_bps": 24.0,\n        })\n        assert r.success is True\n        with fabrica() as db:\n            op = db.query(models.PaperOperacion).one()\n            assert op.strategy == "SCANNER_DETERMINISTA"\n            assert op.expected_edge_bps == 42.0\n            assert op.expected_cost_bps == 18.0\n            assert op.expected_net_bps == 24.0\n    finally:\n        engine.dispose()\n\n\ndef test_main_prioriza_flags_internos_y_pasa_economics():\n    from pathlib import Path\n    import backend.main as main\n    text = Path(main.__file__).read_text(encoding="utf-8")\n    assert 'a.get("_balance_detected") or a.get("_position_detected")' in text\n    assert 'economics=economics' in text\n''', encoding="utf-8")
+
+          Path(".github/workflows/one-shot-paper-economics-thread.yml").unlink()
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat(paper): conserva contexto economico por fill"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
