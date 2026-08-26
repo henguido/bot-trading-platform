@@ -153,6 +153,7 @@ function DashboardPage() {
   const deployedPct = operativo?.capital_desplegado_pct ?? 0;
   const deployedBar = Math.max(0, Math.min(100, Number(deployedPct) || 0));
   const usuario = localStorage.getItem("user_name") || "Operador";
+  const limites = operativo?.limites_riesgo;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -177,6 +178,12 @@ function DashboardPage() {
                 {operativo.decision_engine}
               </StatusPill>
             )}
+            <button
+              onClick={() => navigate("/historial")}
+              className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/10"
+            >
+              Journal
+            </button>
             <div className="ml-0 flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 lg:ml-2">
               <div className="text-right">
                 <p className="text-xs text-slate-500">Sesión</p>
@@ -276,6 +283,39 @@ function DashboardPage() {
                     <span>{mensaje}</span>
                   </div>
                 ))}
+              </section>
+            )}
+
+            {limites && (
+              <section className="mt-4 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+                <div className="border-b border-slate-800 px-5 py-3">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-medium text-slate-300">Límites de riesgo vigentes</p>
+                    <p className="text-xs text-slate-600">Día de riesgo: {limites.timezone_dia_riesgo}</p>
+                  </div>
+                </div>
+                <div className="grid gap-px bg-slate-800 sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="bg-slate-950/70 px-5 py-4">
+                    <p className="text-xs text-slate-600">Asignación / operación</p>
+                    <p className="mt-1 font-semibold text-slate-200">{porcentaje(limites.asignacion_maxima_por_operacion_pct, true)}</p>
+                  </div>
+                  <div className="bg-slate-950/70 px-5 py-4">
+                    <p className="text-xs text-slate-600">Tope / operación</p>
+                    <p className="mt-1 font-semibold text-slate-200">{usd(limites.monto_maximo_por_operacion_usd)}</p>
+                  </div>
+                  <div className="bg-slate-950/70 px-5 py-4">
+                    <p className="text-xs text-slate-600">Pérdida diaria máxima</p>
+                    <p className="mt-1 font-semibold text-rose-300">{usd(limites.perdida_realizada_diaria_maxima_usd)}</p>
+                  </div>
+                  <div className="bg-slate-950/70 px-5 py-4">
+                    <p className="text-xs text-slate-600">Exposición total máxima</p>
+                    <p className="mt-1 font-semibold text-slate-200">{usd(limites.exposicion_total_maxima_usd)}</p>
+                  </div>
+                  <div className="bg-slate-950/70 px-5 py-4">
+                    <p className="text-xs text-slate-600">Exposición / activo</p>
+                    <p className="mt-1 font-semibold text-slate-200">{usd(limites.exposicion_por_activo_maxima_usd)}</p>
+                  </div>
+                </div>
               </section>
             )}
 
