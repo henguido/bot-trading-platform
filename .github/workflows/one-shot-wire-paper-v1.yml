@@ -43,7 +43,7 @@ jobs:
                 assets_disponibles, balances_reales, symbols_info = get_available_assets(
                     medidor=medidor)
             except Exception as e:
-'''
+          '''
           new_assets = '''            try:
                 # Reutiliza el MISMO GET /account que ya obtiene balances para
                 # extraer la fee taker. No añade una peticion al ciclo.
@@ -65,7 +65,7 @@ jobs:
                     "fuente_fee_maker": "NO_DISPONIBLE",
                 }
             except Exception as e:
-'''
+          '''
           replace_once(old_assets, new_assets, 'assets con costes')
 
           old_cartera = '''            cartera = construir_cartera(
@@ -78,7 +78,7 @@ jobs:
                 ultimos_movimientos=contexto.ultimos_movimientos,
                 ultimos_precios_venta=contexto.ultimos_precios_venta,
             )
-'''
+          '''
           new_cartera = '''            cartera = construir_cartera(
                 modo_real=settings.MODO_REAL,
                 simulador=simulator,
@@ -102,16 +102,16 @@ jobs:
                     )
                 ),
             )
-'''
+          '''
           replace_once(old_cartera, new_cartera, 'construccion cartera')
 
           replace_once(
               '''                # activa. En PAPER, exclusivamente del Simulator; en LIVE,
                 # saldo broker + contexto persistente. El bucle no mezcla.
-''',
+          ''',
               '''                # activa. En PAPER, exclusivamente del ledger persistente;
                 # en LIVE, saldo broker + contexto persistente. El bucle no mezcla.
-''',
+          ''',
               'comentario fuente PAPER',
           )
 
