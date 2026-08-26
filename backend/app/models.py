@@ -124,6 +124,49 @@ class Fill(Base):
     orden = relationship("Orden", back_populates="fills")
 
 
+class PaperLedger(Base):
+    """Libro PAPER persistente, completamente separado del ledger LIVE."""
+    __tablename__ = "paper_ledgers"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", name="uq_paper_ledger_usuario"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    initial_capital_usd = Column(Float, nullable=False)
+    creado_en = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    operaciones = relationship("PaperOperacion", back_populates="ledger",
+                               order_by="PaperOperacion.id")
+
+
+class PaperOperacion(Base):
+    """Fill PAPER append-only con la friccion observada de ejecucion."""
+    __tablename__ = "paper_operaciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ledger_id = Column(Integer, ForeignKey("paper_ledgers.id"), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    side = Column(String(8), nullable=False)
+
+    reference_price = Column(Float, nullable=False)
+    fill_price = Column(Float, nullable=False)
+    base_quantity = Column(Float, nullable=False)
+    quote_gross = Column(Float, nullable=False)
+    fee_usd = Column(Float, nullable=False)
+    quote_net = Column(Float, nullable=False)
+    slippage_bps = Column(Float, nullable=False)
+    fee_taker_bps = Column(Float, nullable=False)
+
+    strategy = Column(String(64), nullable=True)
+    expected_edge_bps = Column(Float, nullable=True)
+    expected_cost_bps = Column(Float, nullable=True)
+    expected_net_bps = Column(Float, nullable=True)
+    creada_en = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    ledger = relationship("PaperLedger", back_populates="operaciones")
+
+
 class LlmCallAudit(Base):
     """
     Metricas de UNA llamada al LLM. Tabla propia y no DecisionAudit porque la
