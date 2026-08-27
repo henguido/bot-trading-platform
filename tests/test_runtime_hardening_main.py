@@ -30,3 +30,9 @@ def test_loop_usa_espera_interrumpible_y_coordinador_comparte_stop_event():
     assert "stop_trading.wait(settings.WAIT_TIME)" in fuente
     assert "time.sleep(settings.WAIT_TIME)" not in fuente
     assert "stop_event=stop_trading" in fuente
+
+
+def test_shutdown_no_reintroduce_sleep_bloqueante_de_cuatro_horas():
+    fuente = MAIN.read_text(encoding="utf-8")
+    assert "time.sleep(settings.WAIT_TIME)" not in fuente
+    assert fuente.count("stop_trading.wait(settings.WAIT_TIME)") == 1
