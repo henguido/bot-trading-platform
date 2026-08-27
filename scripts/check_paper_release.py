@@ -6,9 +6,11 @@ versión PAPER funcional y económicamente medible.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -129,13 +131,23 @@ def evaluar(config, esquema, *, profitability_gate_enabled: bool, environ=None):
 
 
 def main():
-    from backend.config import settings
-    from backend.economia.integracion_05e import PROFITABILITY_GATE_05E_ENABLED
-    from backend.esquema import estado_esquema
+    # `backend.config` puede emitir avisos humanos al importarse. El CLI de
+    # readiness reserva stdout exclusivamente para JSON para que PowerShell/CI
+    # puedan parsearlo; esos avisos siguen visibles por stderr.
+    avisos = io.StringIO()
+    with redirect_stdout(avisos):
+        from backend.config import settings
+        from backend.economia.integracion_05e import PROFITABILITY_GATE_05E_ENABLED
+        from backend.esquema import estado_esquema
+        esquema = estado_esquema()
+
+    texto_avisos = avisos.getvalue()
+    if texto_avisos:
+        print(texto_avisos, end="", file=sys.stderr)
 
     resultado = evaluar(
         settings,
-        estado_esquema(),
+        esquema,
         profitability_gate_enabled=PROFITABILITY_GATE_05E_ENABLED,
     )
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
