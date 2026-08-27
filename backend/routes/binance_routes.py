@@ -4,6 +4,9 @@ from backend.config import settings
 from backend.app.auth import get_current_user
 from backend.app import models
 from backend.finanzas import campos, pnl_no_realizado, precio_medio_de
+from backend.release_readiness import evaluar as evaluar_readiness, resumen_publico
+from backend.economia.integracion_05e import PROFITABILITY_GATE_05E_ENABLED
+from backend.esquema import estado_esquema
 
 router = APIRouter()
 binance = BinanceConnector()
@@ -73,3 +76,15 @@ def get_binance_balance(current_user: models.User = Depends(get_current_user)):
         summary.append(fila)
 
     return {"modo": settings.TRADING_MODE, "balances": summary}
+
+
+@router.get("/api/readiness", tags=["Sistema"])
+def get_paper_readiness(current_user: models.User = Depends(get_current_user)):
+    """Resumen seguro de readiness PAPER; no hace red ni expone checks sensibles."""
+    _ = current_user
+    resultado = evaluar_readiness(
+        settings,
+        estado_esquema(),
+        profitability_gate_enabled=PROFITABILITY_GATE_05E_ENABLED,
+    )
+    return resumen_publico(resultado)
