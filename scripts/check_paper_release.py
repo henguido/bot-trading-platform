@@ -8,7 +8,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+
+# Cuando se ejecuta como `python scripts/check_paper_release.py`, Python coloca
+# `scripts/` (no la raíz del repositorio) en sys.path. Hacemos el CLI
+# autocontenido para que el comando documentado funcione igual en Windows y
+# Linux sin exigir PYTHONPATH ni `python -m`.
+RAIZ = Path(__file__).resolve().parents[1]
+if str(RAIZ) not in sys.path:
+    sys.path.insert(0, str(RAIZ))
 
 
 @dataclass(frozen=True)
