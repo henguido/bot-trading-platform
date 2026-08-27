@@ -1,0 +1,49 @@
+name: one-shot-scan-loop-tests
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+          fetch-depth: 0
+      - name: Inventory loop tests
+        shell: python
+        run: |
+          from pathlib import Path
+          found = []
+          for p in sorted(Path('tests').glob('test_*.py')):
+              s = p.read_text(encoding='utf-8')
+              if 'trading_loop()' not in s:
+                  continue
+              row = {
+                  'file': str(p),
+                  'calls': s.count('trading_loop()'),
+                  'stop_trading': 'stop_trading' in s,
+                  'main_time_sleep': 'main.time' in s and 'sleep' in s,
+                  'plain_sleep': 'sleep(' in s,
+              }
+              found.append(row)
+              print(row)
+          print('TOTAL', len(found))
+          suspicious = [r for r in found if not r['stop_trading']]
+          print('SUSPICIOUS', suspicious)
+      - name: Remove helper
+        if: always()
+        run: |
+          rm -f .github/workflows/one-shot-scan-loop-tests.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/one-shot-scan-loop-tests.yml
+          git commit -m "chore(ci): retira inventario temporal de tests" || true
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper || true
