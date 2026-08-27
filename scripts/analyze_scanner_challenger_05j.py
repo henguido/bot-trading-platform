@@ -22,6 +22,7 @@ import json
 import math
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
 
 RAIZ_REPO = Path(__file__).resolve().parents[1]
@@ -71,17 +72,44 @@ def _score(features: dict, weights: dict) -> float:
     return sum(float(features[k]) * float(weights[k]) for k in weights)
 
 
+def _diagnostico_oos(oos: list[dict]) -> list[dict]:
+    salida = []
+    for bucket in sorted({str(o.get("run_bucket")) for o in oos}):
+        group = [o for o in oos if str(o.get("run_bucket")) == bucket]
+        estados = Counter(str(o.get("settlement_status") or "SIN_ESTADO") for o in group)
+        settled_ok = sum(
+            1 for o in group
+            if bool(o.get("settled")) and o.get("settlement_status") == "OK"
+        )
+        pendientes = sum(1 for o in group if not bool(o.get("settled")))
+        salida.append({
+            "run_bucket": bucket,
+            "total": len(group),
+            "settled_ok": settled_ok,
+            "pending": pendientes,
+            "settlement_status_counts": dict(sorted(estados.items())),
+            "complete_ok_20": len(group) == 20 and settled_ok == 20,
+            "due_min": min((o.get("due_at") for o in group if o.get("due_at")), default=None),
+            "due_max": max((o.get("due_at") for o in group if o.get("due_at")), default=None),
+        })
+    return salida
+
+
 def construir_resumen(state: dict) -> dict:
     obs = state.get("observations") if isinstance(state, dict) else None
     if not isinstance(obs, list):
         raise ValueError("estado 05I invalido: falta observations[]")
 
-    settled = [
+    oos = [
         o for o in obs
+        if str(o.get("run_bucket", "")) >= OOS_START_BUCKET
+    ]
+    settled = [
+        o for o in oos
         if o.get("settled")
         and o.get("settlement_status") == "OK"
-        and str(o.get("run_bucket", "")) >= OOS_START_BUCKET
     ]
+    diagnostico_oos = _diagnostico_oos(oos)
 
     bucket_ids = sorted({o["run_bucket"] for o in settled})
     buckets = []
@@ -157,6 +185,14 @@ def construir_resumen(state: dict) -> dict:
         "hypothesis_frozen_before_oos": True,
         "base_weights": BASE_WEIGHTS,
         "challenger_weights": CHALLENGER_WEIGHTS,
+        "oos_total_observations": len(oos),
+        "oos_settled_ok_observations": len(settled),
+        "oos_pending_observations": sum(1 for o in oos if not bool(o.get("settled"))),
+        "oos_non_ok_settled_observations": sum(
+            1 for o in oos
+            if bool(o.get("settled")) and o.get("settlement_status") != "OK"
+        ),
+        "oos_bucket_diagnostics": diagnostico_oos,
         "complete_oos_buckets": len(buckets),
         "oos_matured_observations": len(buckets) * 20,
         "challenger_minus_base_top_gross_bps": _stats([b["challenger_minus_base_top_gross_bps"] for b in buckets]),
