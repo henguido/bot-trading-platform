@@ -36,3 +36,17 @@ def test_shutdown_no_reintroduce_sleep_bloqueante_de_cuatro_horas():
     fuente = MAIN.read_text(encoding="utf-8")
     assert "time.sleep(settings.WAIT_TIME)" not in fuente
     assert fuente.count("stop_trading.wait(settings.WAIT_TIME)") == 1
+
+
+def test_suites_del_loop_usan_la_espera_cooperativa_actual():
+    rutas = (
+        "test_telemetria_http.py",
+        "test_batch_mercado.py",
+        "test_elegibilidad.py",
+        "test_persistencia_antes_de_esperar.py",
+        "test_robustez_logging_ciclo.py",
+    )
+    for nombre in rutas:
+        fuente = (RAIZ / "tests" / nombre).read_text(encoding="utf-8")
+        assert 'main.time, "sleep"' not in fuente, nombre
+        assert "main.stop_trading" in fuente, nombre
