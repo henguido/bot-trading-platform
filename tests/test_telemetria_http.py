@@ -1068,13 +1068,13 @@ def test_el_numero_de_incrementos_de_ciclo_no_ha_cambiado():
 
 
 def test_el_scheduling_no_lo_toca_la_telemetria():
-    """Todo sleep del bucle sigue esperando exactamente settings.WAIT_TIME."""
+    """La espera cooperativa sigue usando exactamente settings.WAIT_TIME."""
     fn = _trading_loop_ast()
-    sleeps = [n for n in ast.walk(fn)
-              if isinstance(n, ast.Call)
-              and getattr(n.func, "attr", None) == "sleep"]
-    assert sleeps, "el bucle debe seguir esperando entre ciclos"
-    for nodo in sleeps:
+    waits = [n for n in ast.walk(fn)
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", None) == "wait"]
+    assert waits, "el bucle debe seguir esperando entre ciclos"
+    for nodo in waits:
         assert len(nodo.args) == 1
         assert ast.dump(nodo.args[0]) == ast.dump(
             ast.parse("settings.WAIT_TIME", mode="eval").body), (
@@ -1130,7 +1130,8 @@ def bucle(monkeypatch, bd):
     limite = {"n": 4}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
-    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)
     # volcar() resuelve SessionLocal en el momento de llamar: basta parchear
     # el atributo del modulo para que la telemetria caiga en la BD de prueba.
     monkeypatch.setattr("backend.app.database.SessionLocal", bd)

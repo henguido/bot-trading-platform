@@ -424,7 +424,8 @@ def ciclo(monkeypatch):
         monkeypatch.setattr(conector_, "client", cliente, raising=False)
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
-    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)
     monkeypatch.setattr(ac.simulator, "positions", {}, raising=False)
 
     def contexto_falso():

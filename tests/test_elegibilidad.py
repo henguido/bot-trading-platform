@@ -510,7 +510,8 @@ def ciclo(monkeypatch):
     capital = {"v": 20.0}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
-    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)
     monkeypatch.setattr(ac.simulator, "positions", {}, raising=False)
 
     def contexto_falso():
