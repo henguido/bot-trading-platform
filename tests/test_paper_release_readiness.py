@@ -1,0 +1,90 @@
+from types import SimpleNamespace
+
+from scripts.check_paper_release import evaluar
+
+
+def _config(**overrides):
+    base = dict(
+        MODO_REAL=False,
+        TRADING_MODE="PAPER",
+        INITIAL_CAPITAL_USD=500.0,
+        LIMITE_ASIGNACION_POR_OPERACION=0.02,
+        MAX_DAILY_LOSS_USDT=20.0,
+        DECISION_ENGINE="SAFE_NO_TRADE",
+        OPENAI_API_KEY=None,
+        BINANCE_API_KEY="synthetic",
+        BINANCE_API_SECRET="synthetic",
+        CORS_ORIGINS=("http://localhost:5173",),
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def _schema(ok=True):
+    return SimpleNamespace(
+        alineado=ok,
+        estado="OK" if ok else "SCHEMA_MIGRATION_REQUIRED",
+        revision_actual="0007_decision_cycle_audit" if ok else "0006_paper_ledger",
+        revision_esperada="0007_decision_cycle_audit",
+    )
+
+
+def test_release_ready_con_paper_seguro_y_config_explicita():
+    r = evaluar(
+        _config(),
+        _schema(),
+        profitability_gate_enabled=False,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    assert r["ready"] is True
+    assert r["status"] == "READY"
+    assert r["blockers"] == 0
+    assert r["warnings"] == 0
+
+
+def test_release_bloquea_live_gate_no_promovido_y_asignacion_mayor_a_2pct():
+    r = evaluar(
+        _config(MODO_REAL=True, TRADING_MODE="LIVE", LIMITE_ASIGNACION_POR_OPERACION=0.03),
+        _schema(),
+        profitability_gate_enabled=True,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    assert r["ready"] is False
+    codigos = {c["codigo"] for c in r["checks"] if c["nivel"] == "BLOCKER"}
+    assert {"MODO_PAPER", "ASIGNACION", "PROFITABILITY_GATE_05E"} <= codigos
+
+
+def test_gpt_sin_api_key_y_binance_sin_fee_source_son_blockers():
+    r = evaluar(
+        _config(DECISION_ENGINE="GPT", BINANCE_API_KEY=None, BINANCE_API_SECRET=None),
+        _schema(),
+        profitability_gate_enabled=False,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    codigos = {c["codigo"] for c in r["checks"] if c["nivel"] == "BLOCKER"}
+    assert "DECISION_ENGINE" in codigos
+    assert "BINANCE_FEE_SOURCE" in codigos
+
+
+def test_default_de_perdida_diaria_es_warning_no_falso_ready_blocker():
+    r = evaluar(
+        _config(),
+        _schema(),
+        profitability_gate_enabled=False,
+        environ={},
+    )
+    assert r["ready"] is True
+    assert r["warnings"] == 1
+    warning = [c for c in r["checks"] if c["nivel"] == "WARN"][0]
+    assert warning["codigo"] == "KILL_SWITCH_EXPLICITO"
+
+
+def test_schema_desalineado_bloquea_release():
+    r = evaluar(
+        _config(),
+        _schema(ok=False),
+        profitability_gate_enabled=False,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    assert r["ready"] is False
+    assert any(c["codigo"] == "ALEMBIC" and c["nivel"] == "BLOCKER" for c in r["checks"])
