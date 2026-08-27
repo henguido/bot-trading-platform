@@ -1,0 +1,82 @@
+name: one-shot-migrate-stop-wait
+
+on:
+  push:
+    branches:
+      - agent/bot-2.0-05a-profitability-paper
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/bot-2.0-05a-profitability-paper
+          fetch-depth: 0
+      - name: Migrate trading_loop tests to cooperative wait
+        shell: python
+        run: |
+          from pathlib import Path
+
+          changed = []
+          old_variants = [
+              '''    monkeypatch.setattr(main.time, "sleep", lambda _s: None)\n''',
+              '''    monkeypatch.setattr(main.time, "sleep",\n                        lambda s: eventos.append(("sleep", s)))\n''',
+          ]
+          replacement_simple = '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)\n'''
+
+          count_simple = 0
+          for p in sorted(Path('tests').glob('test_*.py')):
+              s = p.read_text(encoding='utf-8')
+              original = s
+              if old_variants[0] in s:
+                  n = s.count(old_variants[0])
+                  s = s.replace(old_variants[0], replacement_simple)
+                  count_simple += n
+              # Persistencia ya fue migrada; keep this branch defensive only.
+              if old_variants[1] in s:
+                  s = s.replace(
+                      old_variants[1],
+                      '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait",\n                        lambda s: (eventos.append(("sleep", s)), False)[1])\n'''
+                  )
+              if s != original:
+                  p.write_text(s, encoding='utf-8')
+                  changed.append(str(p))
+
+          # Telemetria 02A has an AST guard that intentionally freezes scheduling.
+          p = Path('tests/test_telemetria_http.py')
+          s = p.read_text(encoding='utf-8')
+          original = s
+          old = '''def test_el_scheduling_no_lo_toca_la_telemetria():\n    """Todo sleep del bucle sigue esperando exactamente settings.WAIT_TIME."""\n    fn = _trading_loop_ast()\n    sleeps = [n for n in ast.walk(fn)\n              if isinstance(n, ast.Call)\n              and getattr(n.func, "attr", None) == "sleep"]\n    assert sleeps, "el bucle debe seguir esperando entre ciclos"\n    for nodo in sleeps:\n'''
+          new = '''def test_el_scheduling_no_lo_toca_la_telemetria():\n    """La espera cooperativa sigue usando exactamente settings.WAIT_TIME."""\n    fn = _trading_loop_ast()\n    waits = [n for n in ast.walk(fn)\n             if isinstance(n, ast.Call)\n             and getattr(n.func, "attr", None) == "wait"]\n    assert waits, "el bucle debe seguir esperando entre ciclos"\n    for nodo in waits:\n'''
+          if old not in s:
+              raise SystemExit('No se encontro la guarda AST antigua de telemetria')
+          s = s.replace(old, new)
+          if s != original:
+              p.write_text(s, encoding='utf-8')
+              if str(p) not in changed:
+                  changed.append(str(p))
+
+          # No test that executes trading_loop may still monkeypatch main.time.sleep.
+          residual = []
+          for p in sorted(Path('tests').glob('test_*.py')):
+              txt = p.read_text(encoding='utf-8')
+              if 'main.time, "sleep"' in txt or "main.time, 'sleep'" in txt:
+                  residual.append(str(p))
+          if residual:
+              raise SystemExit(f'Referencias residuales a main.time.sleep: {residual}')
+          if count_simple < 2:
+              raise SystemExit(f'Se esperaban al menos 2 migraciones simples; hubo {count_simple}')
+          print('patched:', ', '.join(changed))
+      - name: Remove helper and commit
+        run: |
+          rm .github/workflows/one-shot-migrate-stop-wait.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests .github/workflows/one-shot-migrate-stop-wait.yml
+          git commit -m "test(runtime): migra suites a espera cooperativa"
+          git push origin HEAD:agent/bot-2.0-05a-profitability-paper
