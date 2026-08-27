@@ -23,31 +23,25 @@ jobs:
           from pathlib import Path
 
           changed = []
-          old_variants = [
-              '''    monkeypatch.setattr(main.time, "sleep", lambda _s: None)\n''',
-              '''    monkeypatch.setattr(main.time, "sleep",\n                        lambda s: eventos.append(("sleep", s)))\n''',
-          ]
-          replacement_simple = '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)\n'''
+          replacements = {
+              '''    monkeypatch.setattr(main.time, "sleep", lambda _s: None)\n''':
+              '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)\n''',
+              '''    monkeypatch.setattr(main.time, "sleep", lambda s: esperas.append(s))\n''':
+              '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait",\n                        lambda s: (esperas.append(s), False)[1])\n''',
+          }
 
-          count_simple = 0
+          total = 0
           for p in sorted(Path('tests').glob('test_*.py')):
               s = p.read_text(encoding='utf-8')
               original = s
-              if old_variants[0] in s:
-                  n = s.count(old_variants[0])
-                  s = s.replace(old_variants[0], replacement_simple)
-                  count_simple += n
-              # Persistencia ya fue migrada; keep this branch defensive only.
-              if old_variants[1] in s:
-                  s = s.replace(
-                      old_variants[1],
-                      '''    main.stop_trading.clear()\n    monkeypatch.setattr(main.stop_trading, "wait",\n                        lambda s: (eventos.append(("sleep", s)), False)[1])\n'''
-                  )
+              for old, new in replacements.items():
+                  if old in s:
+                      total += s.count(old)
+                      s = s.replace(old, new)
               if s != original:
                   p.write_text(s, encoding='utf-8')
                   changed.append(str(p))
 
-          # Telemetria 02A has an AST guard that intentionally freezes scheduling.
           p = Path('tests/test_telemetria_http.py')
           s = p.read_text(encoding='utf-8')
           original = s
@@ -61,7 +55,6 @@ jobs:
               if str(p) not in changed:
                   changed.append(str(p))
 
-          # No test that executes trading_loop may still monkeypatch main.time.sleep.
           residual = []
           for p in sorted(Path('tests').glob('test_*.py')):
               txt = p.read_text(encoding='utf-8')
@@ -69,8 +62,8 @@ jobs:
                   residual.append(str(p))
           if residual:
               raise SystemExit(f'Referencias residuales a main.time.sleep: {residual}')
-          if count_simple < 2:
-              raise SystemExit(f'Se esperaban al menos 2 migraciones simples; hubo {count_simple}')
+          if total < 3:
+              raise SystemExit(f'Se esperaban al menos 3 migraciones; hubo {total}')
           print('patched:', ', '.join(changed))
       - name: Remove helper and commit
         run: |
