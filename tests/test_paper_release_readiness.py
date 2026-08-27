@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from scripts.check_paper_release import evaluar
+from backend.release_readiness import evaluar, resumen_publico
 
 
 def _config(**overrides):
@@ -88,3 +88,26 @@ def test_schema_desalineado_bloquea_release():
     )
     assert r["ready"] is False
     assert any(c["codigo"] == "ALEMBIC" and c["nivel"] == "BLOCKER" for c in r["checks"])
+
+
+def test_resumen_publico_no_expone_detalle_de_checks_ni_secretos():
+    completo = evaluar(
+        _config(DECISION_ENGINE="GPT", OPENAI_API_KEY=None,
+                BINANCE_API_KEY=None, BINANCE_API_SECRET=None),
+        _schema(),
+        profitability_gate_enabled=False,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    publico = resumen_publico(completo)
+
+    assert publico == {
+        "release": "PAPER_V1",
+        "ready": False,
+        "status": "NOT_READY",
+        "blockers": completo["blockers"],
+        "warnings": completo["warnings"],
+    }
+    assert "checks" not in publico
+    texto = repr(publico)
+    assert "OPENAI" not in texto
+    assert "BINANCE" not in texto
