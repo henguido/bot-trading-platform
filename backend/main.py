@@ -54,6 +54,7 @@ from backend.observabilidad.ciclos import (
 from contextlib import asynccontextmanager
 import sys
 import time
+import threading
 import pytz, traceback
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +141,7 @@ def priorizar_activos_por_importancia(activos):
     return [a for a in activos if a["position_quantity"] > 0]
 
 motor_riesgo = MotorRiesgo()
+stop_trading = threading.Event()
 
 
 def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
@@ -210,15 +212,10 @@ def reportar_error_de_ciclo(e, *, destino_rastro=None):
     imprimir_resistente(rastro, destino_rastro or sys.stderr)
 
 
-def get_min_notional(symbol, filters_dict):
-    symbol_filters = filters_dict.get(symbol)
-    if not symbol_filters:
-        return 1.0
-
-    for f in symbol_filters:
-        if f["filterType"] in ["NOTIONAL", "MIN_NOTIONAL"]:
-            return float(f.get("minNotional", 1.0))
-    return 1.0
+def get_min_notional(symbol, info_por_symbol):
+    """Minimo real del exchange; None significa desconocido, nunca un default."""
+    filtros = elegibilidad.leer_filtros(info_por_symbol.get(symbol))
+    return float(filtros.min_notional) if filtros is not None else None
 
 def _obtener_assets_con_costes(*, medidor=None):
     """Normaliza 3/4 valores sin inventar costes."""
@@ -252,7 +249,7 @@ def trading_loop():
     noticias_cache = None
     timestamp_cache = None
 
-    while True:
+    while not stop_trading.is_set():
         medidor = MedidorCicloHttp(nuevo_ciclo_id(), ciclo_num=ciclo)
         esperar_ciclo = False
         resumen_decision_ciclo = None
@@ -617,10 +614,22 @@ def trading_loop():
 
                     estado_riesgo = cartera.estado_riesgo()
 
+                    min_notional = (
+                        get_min_notional(symbol, info_por_symbol)
+                        if lado is Lado.COMPRA else 0.0
+                    )
+                    if lado is Lado.COMPRA and min_notional is None:
+                        imprimir_resistente(
+                            f"[EXCHANGE] {symbol}: filtros LOT_SIZE/NOTIONAL desconocidos; compra bloqueada")
+                        if resumen_decision_ciclo is not None:
+                            resumen_decision_ciclo.anotar_omision(
+                                "FILTROS_EXCHANGE_DESCONOCIDOS")
+                        continue
+
                     propuesta = PropuestaOperacion(
                         symbol=symbol, side=lado, precio=precio_actual,
                         base_quantity_modelo=base_quantity,
-                        min_notional=get_min_notional(symbol, filters_dict),
+                        min_notional=min_notional,
                     )
                     veredicto = motor_riesgo.evaluar(
                         propuesta,
@@ -710,7 +719,7 @@ def trading_loop():
                         f"{type(e).__name__}: {e}")
 
             if esperar_ciclo and sys.exc_info()[0] is None:
-                time.sleep(settings.WAIT_TIME)
+                stop_trading.wait(settings.WAIT_TIME)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -733,6 +742,7 @@ coordinador = CoordinadorTrading(
     objetivo=trading_loop,
     candado=candado_por_defecto(settings.DATABASE_URL),
     precondiciones=(_precondicion_esquema,),
+    stop_event=stop_trading,
 )
 
 
