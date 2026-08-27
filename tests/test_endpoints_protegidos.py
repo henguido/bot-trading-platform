@@ -28,6 +28,9 @@ ENDPOINTS = [
     # transacciones; solo modo de ejecucion y quien lidera el bucle.
     ("backend/main.py",                        "/health",                    False),
     ("backend/routes/binance_routes.py",       "/balance",                   True),
+    # Readiness resume postura operativa/configuracion. Aunque no expone
+    # detalles de checks ni secretos, sigue siendo diagnostico interno.
+    ("backend/routes/binance_routes.py",       "/api/readiness",             True),
     ("backend/routes/transacciones_routes.py", "/api/transacciones-reales", True),
     # Expone diagnostico del embudo de decision del usuario (candidatos,
     # rechazos, ejecuciones). Es dato operativo/financiero y debe quedar aislado.
