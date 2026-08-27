@@ -25,7 +25,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def objetivo():
-    """Bucle falso: se queda esperando hasta que la prueba lo suelta."""
+    """Bucle falso cooperativo: espera sobre el mismo Event del coordinador."""
     parar = threading.Event()
 
     def bucle():
@@ -34,6 +34,16 @@ def objetivo():
     bucle.parar = parar
     yield bucle
     parar.set()
+
+
+def _coord(objetivo, *, candado=None, nombre="prueba-loop", stop_timeout=1.0):
+    return CoordinadorTrading(
+        objetivo=objetivo,
+        candado=candado,
+        nombre=nombre,
+        stop_event=objetivo.parar,
+        stop_timeout=stop_timeout,
+    )
 
 
 # ── Importar main no arranca nada ───────────────────────────────────────────
@@ -70,7 +80,7 @@ def test_main_usa_lifespan_explicito():
 
 # ── Arranque idempotente ────────────────────────────────────────────────────
 def test_iniciar_una_vez_deja_exactamente_un_bucle(objetivo):
-    coord = CoordinadorTrading(objetivo=objetivo, candado=None, nombre="prueba-loop")
+    coord = _coord(objetivo, nombre="prueba-loop")
     assert coord.activo is False
 
     assert coord.iniciar() is True
@@ -78,18 +88,18 @@ def test_iniciar_una_vez_deja_exactamente_un_bucle(objetivo):
     assert coord.es_lider is True
     assert sum(1 for t in threading.enumerate() if t.name == "prueba-loop") == 1
 
-    coord.detener()
+    assert coord.detener() is True
 
 
 def test_iniciar_repetido_no_crea_bucles_adicionales(objetivo):
-    coord = CoordinadorTrading(objetivo=objetivo, candado=None, nombre="prueba-idem")
+    coord = _coord(objetivo, nombre="prueba-idem")
     for _ in range(5):
         assert coord.iniciar() is True
 
     vivos = sum(1 for t in threading.enumerate() if t.name == "prueba-idem")
     assert vivos == 1, f"se esperaba 1 bucle, hay {vivos}"
 
-    coord.detener()
+    assert coord.detener() is True
 
 
 # ── Liderazgo: solo uno gana ────────────────────────────────────────────────
@@ -107,8 +117,8 @@ def test_dos_candados_sobre_el_mismo_recurso_solo_uno_gana(tmp_path):
 
 def test_dos_coordinadores_solo_uno_opera(tmp_path, objetivo):
     ruta = str(tmp_path / "lider.lock")
-    a = CoordinadorTrading(objetivo=objetivo, candado=CandadoLocal(ruta), nombre="loop-a")
-    b = CoordinadorTrading(objetivo=objetivo, candado=CandadoLocal(ruta), nombre="loop-b")
+    a = _coord(objetivo, candado=CandadoLocal(ruta), nombre="loop-a")
+    b = _coord(objetivo, candado=CandadoLocal(ruta), nombre="loop-b")
 
     assert a.iniciar() is True
     assert b.iniciar() is False, "el segundo proceso no debe operar"
@@ -118,21 +128,57 @@ def test_dos_coordinadores_solo_uno_opera(tmp_path, objetivo):
     assert "liderazgo" in b.motivo_inactivo.lower(), \
         "el proceso no lider debe explicar por que no opera"
 
-    a.detener()
+    assert a.detener() is True
 
 
 def test_tras_detener_el_liderazgo_queda_libre(tmp_path, objetivo):
     ruta = str(tmp_path / "lider.lock")
-    a = CoordinadorTrading(objetivo=objetivo, candado=CandadoLocal(ruta), nombre="loop-1")
-    b = CoordinadorTrading(objetivo=objetivo, candado=CandadoLocal(ruta), nombre="loop-2")
+    a = _coord(objetivo, candado=CandadoLocal(ruta), nombre="loop-1")
+    b = _coord(objetivo, candado=CandadoLocal(ruta), nombre="loop-2")
 
     assert a.iniciar() is True
-    a.detener()
+    assert a.detener() is True
     assert a.activo is False
     assert a.es_lider is False
 
     assert b.iniciar() is True, "liberado el candado, otro proceso puede tomar el relevo"
-    b.detener()
+    assert b.detener() is True
+
+
+def test_hilo_no_cooperativo_retiene_liderazgo_hasta_terminar(tmp_path):
+    """Nunca se libera el candado mientras el objetivo anterior siga vivo."""
+    ruta = str(tmp_path / "lider.lock")
+    liberar = threading.Event()
+    stop = threading.Event()
+
+    def no_cooperativo():
+        liberar.wait(timeout=1)
+
+    a = CoordinadorTrading(
+        objetivo=no_cooperativo,
+        candado=CandadoLocal(ruta),
+        nombre="loop-no-coop",
+        stop_event=stop,
+        stop_timeout=0.01,
+    )
+    b = CoordinadorTrading(
+        objetivo=lambda: None,
+        candado=CandadoLocal(ruta),
+        nombre="loop-relevo",
+    )
+
+    assert a.iniciar() is True
+    assert a.detener() is False
+    assert a.activo is True
+    assert a.es_lider is True
+    assert "detencion pendiente" in a.motivo_inactivo
+    assert b.iniciar() is False, "el relevo no puede entrar mientras el hilo viejo vive"
+
+    liberar.set()
+    a._hilo.join(timeout=1)
+    assert a.detener() is True
+    assert b.iniciar() is True
+    assert b.detener() is True
 
 
 # ── Seleccion de candado ────────────────────────────────────────────────────
