@@ -87,9 +87,10 @@ def bucle(monkeypatch):
                  "evaluable": True, "fallo": None, "iteraciones": 1}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
+    main.stop_trading.clear()
     monkeypatch.setattr(ac.simulator, "positions", {}, raising=False)
-    monkeypatch.setattr(main.time, "sleep",
-                        lambda s: eventos.append(("sleep", s)))
+    monkeypatch.setattr(main.stop_trading, "wait",
+                        lambda s: (eventos.append(("sleep", s)), False)[1])
     monkeypatch.setattr(telemetria_http.MedidorCicloHttp, "volcar",
                         lambda self, **kw: (eventos.append(("volcar", self.ciclo_id)), 0)[1])
 
@@ -311,7 +312,7 @@ def test_9_si_el_proceso_muere_en_el_sleep_la_telemetria_ya_esta_persistida(
     def sleep_interrumpido(_s):
         raise KeyboardInterrupt("apagado durante la espera")
 
-    monkeypatch.setattr(main.time, "sleep", sleep_interrumpido)
+    monkeypatch.setattr(main.stop_trading, "wait", sleep_interrumpido)
 
     with pytest.raises(KeyboardInterrupt):
         bucle(filtros=FILTROS_CAROS, iteraciones=99)
@@ -352,7 +353,7 @@ def test_no_queda_ningun_sleep_dentro_del_cuerpo_del_ciclo():
         for raiz in nodos:
             for nodo in ast.walk(raiz):
                 if isinstance(nodo, ast.Call) and \
-                        getattr(nodo.func, "attr", None) == "sleep":
+                        getattr(nodo.func, "attr", None) in ("sleep", "wait"):
                     pytest.fail(
                         f"main.py:{nodo.lineno}: hay un sleep en el {zona} del "
                         f"ciclo; debe marcar `esperar_ciclo` y dejar la espera "
@@ -370,21 +371,21 @@ def test_el_finally_vuelca_antes_de_esperar():
             attr = getattr(nodo.func, "attr", None)
             if attr == "volcar":
                 posiciones.setdefault("volcar", nodo.lineno)
-            elif attr == "sleep":
-                posiciones.setdefault("sleep", nodo.lineno)
+            elif attr == "wait":
+                posiciones.setdefault("wait", nodo.lineno)
 
     assert "volcar" in posiciones, "el finally debe volcar la telemetria"
-    assert "sleep" in posiciones, "el finally debe contener la unica espera"
-    assert posiciones["volcar"] < posiciones["sleep"], (
+    assert "wait" in posiciones, "el finally debe contener la unica espera cooperativa"
+    assert posiciones["volcar"] < posiciones["wait"], (
         "volcar() tiene que ejecutarse ANTES de la espera")
 
 
 def test_la_espera_del_finally_sigue_siendo_wait_time():
     principal = _try_principal()
-    sleeps = [n for raiz in principal.finalbody for n in ast.walk(raiz)
-              if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "sleep"]
-    assert len(sleeps) == 1
-    assert ast.dump(sleeps[0].args[0]) == ast.dump(
+    waits = [n for raiz in principal.finalbody for n in ast.walk(raiz)
+             if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "wait"]
+    assert len(waits) == 1
+    assert ast.dump(waits[0].args[0]) == ast.dump(
         ast.parse("settings.WAIT_TIME", mode="eval").body), \
         "el tiempo de espera no puede cambiar"
 
