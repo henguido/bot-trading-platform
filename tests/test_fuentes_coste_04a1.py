@@ -222,9 +222,11 @@ def test_profundidad_no_barre_universo_ni_scanner_y_paper_la_difiere():
     )[0]
     assert "obtener_order_book" not in bloque_universo
 
-    bloque_scanner = main.split("# ── SCANNER DETERMINISTICO", 1)[1].split(
-        "if not activos_para_gpt:", 1
-    )[0]
+    # Delimitar por código ejecutable, no por comentarios: la guardia debe
+    # sobrevivir refactors de documentación sin perder su contrato.
+    bloque_scanner = main.split(
+        "resumen_scanner = scanner.ResumenScanner()", 1
+    )[1].split("if not activos_para_gpt:", 1)[0]
     assert "obtener_order_book" not in bloque_scanner
 
     # PAPER recibe un proveedor diferido; el book solo se pide dentro de
