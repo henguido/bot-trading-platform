@@ -73,6 +73,32 @@ export function getHealth() {
   return apiFetch("/health", {}, { auth: false });
 }
 
+export async function downloadPaperJournal(formato = "csv") {
+  const seguro = formato === "json" ? "json" : "csv";
+  const headers = new Headers();
+  const token = localStorage.getItem("token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(
+    `${BASE_URL}/api/paper/journal/export?formato=${seguro}`,
+    { headers },
+  );
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user_name");
+    }
+    const error = new Error(await detalleError(response));
+    error.status = response.status;
+    throw error;
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: seguro === "csv" ? "paper-journal.csv" : "paper-journal.json",
+  };
+}
+
 export async function getWelcomeMessage() {
   const data = await apiFetch("/", {}, { auth: false });
   return data.message;
