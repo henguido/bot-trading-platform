@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getHistorial } from "../services/api";
+import { downloadPaperJournal, getHistorial } from "../services/api";
 
 function HistorialPage() {
   const navigate = useNavigate();
@@ -8,6 +8,7 @@ function HistorialPage() {
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [exportando, setExportando] = useState(null);
 
   useEffect(() => {
     setCargando(true);
@@ -68,21 +69,61 @@ function HistorialPage() {
     setExpandedId((actual) => (actual === id ? null : id));
   };
 
+  const exportar = async (formato) => {
+    setExportando(formato);
+    setError("");
+    try {
+      const { blob, filename } = await downloadPaperJournal(formato);
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = filename;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err.status === 401) {
+        navigate("/login");
+        return;
+      }
+      setError(err.message || "No se pudo exportar el journal");
+    } finally {
+      setExportando(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-cyan-400">PAPER ledger</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">Journal de ejecuciones</h1>
             <p className="mt-1 text-sm text-slate-500">Fills persistidos, fricción ejecutada y contexto económico de cada operación.</p>
           </div>
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="self-start rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300 sm:self-auto"
-          >
-            Volver al dashboard
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => exportar("csv")}
+              disabled={exportando !== null}
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/15 disabled:cursor-wait disabled:opacity-50"
+            >
+              {exportando === "csv" ? "Exportando…" : "Exportar CSV"}
+            </button>
+            <button
+              onClick={() => exportar("json")}
+              disabled={exportando !== null}
+              className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-wait disabled:opacity-50"
+            >
+              {exportando === "json" ? "Exportando…" : "Exportar JSON"}
+            </button>
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300"
+            >
+              Volver al dashboard
+            </button>
+          </div>
         </div>
 
         {error && (
