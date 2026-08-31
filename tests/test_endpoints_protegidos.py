@@ -35,6 +35,9 @@ ENDPOINTS = [
     # Expone diagnostico del embudo de decision del usuario (candidatos,
     # rechazos, ejecuciones). Es dato operativo/financiero y debe quedar aislado.
     ("backend/routes/transacciones_routes.py", "/api/decision-cycles",       True),
+    # El export contiene fills, costes y economia esperada del journal PAPER.
+    # Debe estar aislado por usuario igual que el historial financiero.
+    ("backend/routes/transacciones_routes.py", "/api/paper/journal/export",  True),
     ("backend/routes/historial_routes.py",     "/api/historial",             True),
 ]
 
