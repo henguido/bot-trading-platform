@@ -7,7 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app import models
-from backend.app.auth import get_current_user, get_db
+from backend.app.auth import get_current_user
+from backend.app.database import get_db
 from backend.routes.transacciones_routes import router
 
 
