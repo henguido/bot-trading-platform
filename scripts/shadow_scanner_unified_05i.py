@@ -25,8 +25,7 @@ if str(RAIZ_REPO) not in sys.path:
 
 from backend import scanner
 from backend.config import settings
-from backend.connectors.crypto.binance_connector import BinanceConnector
-from backend.economia.costes import spread_bps_desde_bid_ask
+from backend.connectors.crypto.binance_public_market import BinancePublicMarketData
 from backend.utils.asset_collector import get_available_assets
 
 STATE = RAIZ_REPO / "artifacts" / "scanner-unified-shadow-05i-state.json"
@@ -68,7 +67,7 @@ def _cargar() -> dict:
     return data
 
 
-def _precio_horizonte(binance: BinanceConnector, symbol: str, due_ms: int):
+def _precio_horizonte(binance: BinancePublicMarketData, symbol: str, due_ms: int):
     for interval, max_offset in (("1m", 60_000), ("5m", 300_000), ("1h", 3_600_000)):
         filas = binance.get_recent_klines(symbol, interval=interval, limit=1000)
         for fila in filas or ():
@@ -83,7 +82,7 @@ def _precio_horizonte(binance: BinanceConnector, symbol: str, due_ms: int):
     return None
 
 
-def _madurar(state: dict, binance: BinanceConnector, now: datetime) -> int:
+def _madurar(state: dict, binance: BinancePublicMarketData, now: datetime) -> int:
     matured = 0
     for obs in state["observations"]:
         if obs.get("settled"):
@@ -213,6 +212,7 @@ def construir_resumen(state: dict) -> dict:
         "llm_called": False,
         "scanner_modified": False,
         "single_snapshot_per_bucket": True,
+        "market_data_source": "https://data-api.binance.vision",
         "weights_frozen": dict(scanner.PESOS),
         "horizon_h": HORIZONTE_H,
         "total_observations": len(state.get("observations", [])),
@@ -231,20 +231,34 @@ def construir_resumen(state: dict) -> dict:
     }
 
 
-def _observar(state: dict, binance: BinanceConnector, now: datetime) -> int:
+def _fee_taker_si_disponible():
+    if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
+        return None
+    _activos, _balances, _symbols_info, costes = get_available_assets(incluir_costes_cuenta=True)
+    return costes.get("fee_taker_bps_por_lado")
+
+
+def _observar(state: dict, binance: BinancePublicMarketData, now: datetime) -> int:
     bucket = _bucket(now)
     if any(o.get("run_bucket") == bucket for o in state["observations"]):
         return 0
 
-    activos, _balances, _symbols_info, costes = get_available_assets(incluir_costes_cuenta=True)
-    fee = costes.get("fee_taker_bps_por_lado")
+    symbols_info = binance.get_exchange_symbols_info()
     snapshot = binance.get_price_snapshot()
     metricas_raw = binance.get_market_metrics()
+    if not symbols_info or not snapshot or not metricas_raw:
+        return 0
+
+    fee = _fee_taker_si_disponible()
+    activos = [
+        fila for fila in symbols_info.values()
+        if fila.get("quoteAsset") == "USDT"
+        and fila.get("status") == "TRADING"
+        and fila.get("isSpotTradingAllowed")
+    ]
 
     metricas = []
     for a in activos:
-        if a.get("type") != "crypto":
-            continue
         sym = a.get("symbol")
         if sym not in snapshot:
             continue
@@ -253,6 +267,9 @@ def _observar(state: dict, binance: BinanceConnector, now: datetime) -> int:
             metricas.append(m)
 
     candidatos = scanner.puntuar(metricas)[:TOP_N]
+    if len(candidatos) < TOP_N:
+        return 0
+
     added = 0
     for rank, c in enumerate(candidatos, start=1):
         entry = float(snapshot.get(c.symbol, c.metricas.precio))
@@ -286,7 +303,7 @@ def main() -> None:
         raise RuntimeError("05I solo puede ejecutarse en PAPER; LIVE bloqueado")
     now = datetime.now(timezone.utc)
     state = _cargar()
-    binance = BinanceConnector()
+    binance = BinancePublicMarketData()
     matured = _madurar(state, binance, now)
     added = _observar(state, binance, now)
     summary = construir_resumen(state)
