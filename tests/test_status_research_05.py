@@ -23,7 +23,8 @@ def test_status_consolida_metricas_clave_sin_recalcularlas():
     k = {
         "processed_buckets": 2,
         "paired_complete_buckets": 1,
-        "exchange_filters_checked": True,
+        "exchange_min_notional_checked": True,
+        "exchange_lot_size_checked": True,
         "challenger_minus_base_net_bps": {"mean": 9.0},
         "portfolios": {
             "BASE_05I": {"closed_trades": 5, "realized_pnl_usd": 0.2},
@@ -39,6 +40,11 @@ def test_status_consolida_metricas_clave_sin_recalcularlas():
     assert r["05K"]["base_realized_pnl_usd"] == 0.2
     assert r["05K"]["challenger_minus_base_net_mean_bps"] == 9.0
     assert r["05K"]["execution_filters_checked"] is True
+
+
+def test_status_conserva_compatibilidad_con_campo_agregado_anterior():
+    r = construir_estado(None, None, {"exchange_filters_checked": False})
+    assert r["05K"]["execution_filters_checked"] is False
 
 
 def test_status_tolera_artifacts_ausentes():

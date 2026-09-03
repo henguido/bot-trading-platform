@@ -39,6 +39,16 @@ def _mean(obj):
     return obj.get("mean") if isinstance(obj, dict) else None
 
 
+def _execution_filters_checked(data_k):
+    legacy = data_k.get("exchange_filters_checked")
+    if legacy is not None:
+        return legacy
+    filter_keys = ("exchange_min_notional_checked", "exchange_lot_size_checked")
+    if not any(key in data_k for key in filter_keys):
+        return None
+    return all(data_k.get(key) is True for key in filter_keys)
+
+
 def construir_estado(data_i, data_j, data_k):
     salida = {"05I": None, "05J": None, "05K": None}
 
@@ -90,7 +100,7 @@ def construir_estado(data_i, data_j, data_k):
             "challenger_minus_base_net_mean_bps": _mean(
                 data_k.get("challenger_minus_base_net_bps")
             ),
-            "execution_filters_checked": data_k.get("exchange_filters_checked"),
+            "execution_filters_checked": _execution_filters_checked(data_k),
         }
 
     return salida
