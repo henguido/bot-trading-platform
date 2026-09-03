@@ -28,6 +28,15 @@ def test_workflow_05_es_fail_closed_en_paper_y_no_habilita_live():
     assert "yes-i-understand-the-risk" not in texto
 
 
+def test_workflow_05_no_bloquea_alpha_publico_si_falta_fee_privada():
+    texto = _texto()
+    assert "Report fee source availability" in texto
+    assert 'fee_source=NO_DISPONIBLE' in texto
+    assert 'test -n "$BINANCE_API_KEY"' not in texto
+    assert 'test -n "$BINANCE_API_SECRET"' not in texto
+    assert "05I/05J continuaran con evidencia publica" in texto
+
+
 def test_workflow_05_persiste_estado_y_publica_evidencia():
     texto = _texto()
     assert "actions/cache/restore@v4" in texto
