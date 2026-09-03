@@ -1,0 +1,101 @@
+name: research-05-prospective
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Desfasado del inicio de hora para reducir colisiones de runners.
+    - cron: "17 */4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-05-prospective
+  cancel-in-progress: false
+
+env:
+  APP_ENV: test
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ""
+  INITIAL_CAPITAL_USD: "500"
+  LIMITE_ASIGNACION_POR_OPERACION: "0.02"
+  BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+  BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+  SECRET_KEY: research-05-only-synthetic-secret-key-2026
+
+jobs:
+  prospective-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -c constraints.txt
+          pip install -r requirements-dev.txt -c constraints.txt
+
+      - name: Fail closed unless PAPER and fee source are available
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TRADING_MODE" = "PAPER"
+          test -z "$ALLOW_LIVE_TRADING"
+          test "$INITIAL_CAPITAL_USD" = "500"
+          test "$LIMITE_ASIGNACION_POR_OPERACION" = "0.02"
+          test -n "$BINANCE_API_KEY"
+          test -n "$BINANCE_API_SECRET"
+
+      - name: Restore cumulative shadow state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            artifacts/scanner-unified-shadow-05i-state.json
+            artifacts/strategy-execution-shadow-05k-state.json
+          key: research-05-state-${{ github.run_id }}
+          restore-keys: |
+            research-05-state-
+
+      - name: Run 05I unified scanner shadow
+        run: python scripts/shadow_scanner_unified_05i.py
+
+      - name: Analyze 05J OOS challenger
+        run: python scripts/analyze_scanner_challenger_05j.py
+
+      - name: Run 05K prospective execution shadow
+        run: python scripts/shadow_strategy_execution_05k.py
+
+      - name: Export compact research status
+        run: python scripts/status_research_05.py | tee artifacts/research-05-status.txt
+
+      - name: Save cumulative shadow state
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            artifacts/scanner-unified-shadow-05i-state.json
+            artifacts/strategy-execution-shadow-05k-state.json
+          key: research-05-state-${{ github.run_id }}
+
+      - name: Upload research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-05-${{ github.run_id }}
+          path: |
+            artifacts/scanner-unified-shadow-05i-state.json
+            artifacts/scanner-unified-shadow-05i-summary.json
+            artifacts/scanner-challenger-05j.json
+            artifacts/strategy-execution-shadow-05k-state.json
+            artifacts/strategy-execution-shadow-05k-summary.json
+            artifacts/research-05-status.txt
+          if-no-files-found: warn
+          retention-days: 30
