@@ -42,6 +42,20 @@ def test_release_ready_con_paper_seguro_y_config_explicita():
     assert r["warnings"] == 0
 
 
+def test_release_bloquea_capital_distinto_al_baseline_paper_v1():
+    r = evaluar(
+        _config(INITIAL_CAPITAL_USD=20.0),
+        _schema(),
+        profitability_gate_enabled=False,
+        environ={"MAX_DAILY_LOSS_USDT": "20"},
+    )
+    assert r["ready"] is False
+    capital = next(c for c in r["checks"] if c["codigo"] == "CAPITAL_PAPER")
+    assert capital["nivel"] == "BLOCKER"
+    assert "20.00" in capital["detalle"]
+    assert "500.00" in capital["detalle"]
+
+
 def test_release_bloquea_live_gate_no_promovido_y_asignacion_mayor_a_2pct():
     r = evaluar(
         _config(MODO_REAL=True, TRADING_MODE="LIVE", LIMITE_ASIGNACION_POR_OPERACION=0.03),
