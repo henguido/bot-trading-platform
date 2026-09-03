@@ -10,6 +10,9 @@ import os
 from dataclasses import dataclass
 
 
+PAPER_V1_INITIAL_CAPITAL_USD = 500.0
+
+
 @dataclass(frozen=True)
 class Check:
     codigo: str
@@ -41,11 +44,18 @@ def evaluar(config, esquema, *, profitability_gate_enabled: bool, environ=None):
         )
 
     capital = float(getattr(config, "INITIAL_CAPITAL_USD", 0.0))
-    add(
-        "CAPITAL_PAPER",
-        "OK" if capital > 0 else "BLOCKER",
-        f"capital inicial={capital:.2f} USDT",
-    )
+    if capital == PAPER_V1_INITIAL_CAPITAL_USD:
+        add(
+            "CAPITAL_PAPER",
+            "OK",
+            f"capital inicial={capital:.2f} USDT",
+        )
+    else:
+        add(
+            "CAPITAL_PAPER",
+            "BLOCKER",
+            f"capital inicial={capital:.2f} USDT; PAPER v1 exige baseline={PAPER_V1_INITIAL_CAPITAL_USD:.2f} USDT",
+        )
 
     asignacion = float(getattr(config, "LIMITE_ASIGNACION_POR_OPERACION", 0.0))
     if 0 < asignacion <= 0.02:
