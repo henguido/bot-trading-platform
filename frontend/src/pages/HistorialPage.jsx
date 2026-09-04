@@ -9,6 +9,9 @@ function HistorialPage() {
   const [expandedId, setExpandedId] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [exportando, setExportando] = useState(null);
+  const [filtroTexto, setFiltroTexto] = useState("");
+  const [filtroLado, setFiltroLado] = useState("TODOS");
+  const [filtroEstrategia, setFiltroEstrategia] = useState("TODAS");
 
   useEffect(() => {
     setCargando(true);
@@ -31,14 +34,41 @@ function HistorialPage() {
       .finally(() => setCargando(false));
   }, [navigate]);
 
+  const estrategiasDisponibles = useMemo(
+    () => Array.from(new Set(
+      historial
+        .map((x) => String(x.strategy || "").trim())
+        .filter(Boolean),
+    )).sort((a, b) => a.localeCompare(b)),
+    [historial],
+  );
+
+  const historialFiltrado = useMemo(() => {
+    const texto = filtroTexto.trim().toLowerCase();
+    return historial.filter((item) => {
+      const compra = item.side === "BUY" || item.action === "COMPRAR";
+      const lado = compra ? "BUY" : "SELL";
+      const estrategia = String(item.strategy || "").trim();
+      const coincideTexto = !texto || [
+        item.symbol,
+        item.timestamp,
+        estrategia,
+        item.paper_operation_id,
+      ].some((valor) => String(valor ?? "").toLowerCase().includes(texto));
+      const coincideLado = filtroLado === "TODOS" || filtroLado === lado;
+      const coincideEstrategia = filtroEstrategia === "TODAS" || filtroEstrategia === estrategia;
+      return coincideTexto && coincideLado && coincideEstrategia;
+    });
+  }, [historial, filtroTexto, filtroLado, filtroEstrategia]);
+
   const metricas = useMemo(() => {
-    const compras = historial.filter((x) => x.side === "BUY" || x.action === "COMPRAR").length;
-    const ventas = historial.filter((x) => x.side === "SELL" || x.action === "VENDER").length;
-    const fees = historial.reduce((acc, x) => {
+    const compras = historialFiltrado.filter((x) => x.side === "BUY" || x.action === "COMPRAR").length;
+    const ventas = historialFiltrado.filter((x) => x.side === "SELL" || x.action === "VENDER").length;
+    const fees = historialFiltrado.reduce((acc, x) => {
       const n = Number(x.fee_usd);
       return Number.isFinite(n) ? acc + n : acc;
     }, 0);
-    const slips = historial
+    const slips = historialFiltrado
       .map((x) => Number(x.slippage_bps))
       .filter((x) => Number.isFinite(x));
     return {
@@ -47,7 +77,18 @@ function HistorialPage() {
       fees,
       slippageMedio: slips.length ? slips.reduce((a, b) => a + b, 0) / slips.length : null,
     };
-  }, [historial]);
+  }, [historialFiltrado]);
+
+  const filtrosActivos = Boolean(
+    filtroTexto.trim() || filtroLado !== "TODOS" || filtroEstrategia !== "TODAS",
+  );
+
+  const limpiarFiltros = () => {
+    setFiltroTexto("");
+    setFiltroLado("TODOS");
+    setFiltroEstrategia("TODAS");
+    setExpandedId(null);
+  };
 
   const usd = (valor, decimales = 4) => {
     if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return "—";
@@ -132,26 +173,76 @@ function HistorialPage() {
           </div>
         )}
 
+        <div className="mb-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+            <label className="flex-1">
+              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500">Buscar</span>
+              <input
+                value={filtroTexto}
+                onChange={(e) => setFiltroTexto(e.target.value)}
+                placeholder="Símbolo, fecha, estrategia o ID"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none transition placeholder:text-slate-700 focus:border-cyan-500/50"
+              />
+            </label>
+            <label className="xl:w-44">
+              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500">Lado</span>
+              <select
+                value={filtroLado}
+                onChange={(e) => setFiltroLado(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+              >
+                <option value="TODOS">Todos</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+              </select>
+            </label>
+            <label className="xl:w-64">
+              <span className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-500">Estrategia</span>
+              <select
+                value={filtroEstrategia}
+                onChange={(e) => setFiltroEstrategia(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none focus:border-cyan-500/50"
+              >
+                <option value="TODAS">Todas</option>
+                {estrategiasDisponibles.map((estrategia) => (
+                  <option key={estrategia} value={estrategia}>{estrategia}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={limpiarFiltros}
+              disabled={!filtrosActivos}
+              className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-default disabled:opacity-40"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+          <div className="mt-3 flex flex-col gap-1 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+            <span>Mostrando {historialFiltrado.length} de {historial.length} fills.</span>
+            <span>Los filtros son visuales; CSV/JSON exportan el journal completo y autoritativo.</span>
+          </div>
+        </div>
+
         <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Fills registrados</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{historial.length}</p>
-            <p className="mt-1 text-xs text-slate-600">Fuente: paper_operaciones</p>
+            <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Fills visibles</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{historialFiltrado.length}</p>
+            <p className="mt-1 text-xs text-slate-600">De {historial.length} persistidos</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Compras / ventas</p>
             <p className="mt-2 text-2xl font-semibold text-white">{metricas.compras} / {metricas.ventas}</p>
-            <p className="mt-1 text-xs text-slate-600">Solo ejecuciones confirmadas PAPER</p>
+            <p className="mt-1 text-xs text-slate-600">Sobre la vista filtrada</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Fees ejecutadas</p>
             <p className="mt-2 text-2xl font-semibold text-amber-300">{usd(metricas.fees)}</p>
-            <p className="mt-1 text-xs text-slate-600">Suma de comisiones persistidas</p>
+            <p className="mt-1 text-xs text-slate-600">Suma visible de comisiones persistidas</p>
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
             <p className="text-xs uppercase tracking-[0.15em] text-slate-500">Slippage medio</p>
             <p className="mt-2 text-2xl font-semibold text-cyan-300">{bps(metricas.slippageMedio)}</p>
-            <p className="mt-1 text-xs text-slate-600">Sobre fills con dato disponible</p>
+            <p className="mt-1 text-xs text-slate-600">Sobre fills visibles con dato disponible</p>
           </div>
         </div>
 
@@ -173,6 +264,11 @@ function HistorialPage() {
               <p className="text-sm font-medium text-slate-300">No hay fills PAPER registrados</p>
               <p className="mt-2 text-xs text-slate-500">Las decisiones o señales que no llegan a ejecución no aparecen aquí.</p>
             </div>
+          ) : historialFiltrado.length === 0 && !error ? (
+            <div className="px-5 py-14 text-center">
+              <p className="text-sm font-medium text-slate-300">No hay operaciones que coincidan con los filtros</p>
+              <button onClick={limpiarFiltros} className="mt-3 text-xs font-semibold text-cyan-300 hover:text-cyan-200">Limpiar filtros</button>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -189,7 +285,7 @@ function HistorialPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {historial.map((item, index) => {
+                  {historialFiltrado.map((item, index) => {
                     const id = item.paper_operation_id ?? index;
                     const abierta = expandedId === id;
                     const compra = item.side === "BUY" || item.action === "COMPRAR";
