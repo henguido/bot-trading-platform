@@ -16,6 +16,15 @@ const PRIMARY_REASON_LABELS = {
 
 const reasonLabel = (reason) => PRIMARY_REASON_LABELS[reason] || String(reason || "Sin diagnóstico").replaceAll("_", " ");
 
+const pct = (part, total) => {
+  const numerator = Math.max(0, Number(part) || 0);
+  const denominator = Math.max(0, Number(total) || 0);
+  if (!denominator) return null;
+  return Math.max(0, Math.min(100, (numerator / denominator) * 100));
+};
+
+const pctLabel = (value) => value == null ? "—" : `${value.toFixed(1)}%`;
+
 function Pill({ status = "neutral", children }) {
   const styles = {
     ok: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
@@ -30,18 +39,27 @@ function Pill({ status = "neutral", children }) {
   );
 }
 
-function FunnelStage({ label, value, max, detail }) {
+function FunnelStage({ label, value, max, previous, detail }) {
   const numeric = Math.max(0, Number(value) || 0);
   const denominator = Math.max(1, Number(max) || 1);
   const width = Math.max(3, Math.min(100, (numeric / denominator) * 100));
+  const retention = previous == null ? null : pct(numeric, previous);
+  const loss = retention == null ? null : Math.max(0, 100 - retention);
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-3">
+      <div className="mb-1 flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-slate-300">{label}</p>
           {detail && <p className="text-[11px] text-slate-600">{detail}</p>}
         </div>
-        <span className="font-mono text-sm font-semibold text-slate-200">{numeric}</span>
+        <div className="text-right">
+          <span className="font-mono text-sm font-semibold text-slate-200">{numeric}</span>
+          {retention != null && (
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              {pctLabel(retention)} retenido · {pctLabel(loss)} caída
+            </p>
+          )}
+        </div>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
         <div className="h-full rounded-full bg-cyan-400/80" style={{ width: `${width}%` }} />
@@ -117,6 +135,25 @@ function ObservabilityPage() {
   const riskApproved = Number(counts.riesgo_aprobadas || 0);
   const executions = Number(counts.ejecuciones_ok || 0);
   const funnelMax = Math.max(universe, afterEligibility, afterScanner, engineResults, riskApproved, executions, 1);
+
+  const funnelStages = useMemo(() => [
+    { label: "Elegibilidad", previous: universe, value: afterEligibility },
+    { label: "Scanner", previous: afterEligibility, value: afterScanner },
+    { label: "Motor de decisión", previous: afterScanner, value: engineResults },
+    { label: "Riesgo", previous: engineResults, value: riskApproved },
+    { label: "Ejecución", previous: riskApproved, value: executions },
+  ].map((stage) => ({
+    ...stage,
+    retention: pct(stage.value, stage.previous),
+  })), [universe, afterEligibility, afterScanner, engineResults, riskApproved, executions]);
+
+  const biggestDrop = useMemo(() => {
+    const comparable = funnelStages.filter((stage) => stage.retention != null && stage.previous > 0);
+    if (!comparable.length) return null;
+    return comparable.reduce((worst, stage) => (
+      stage.retention < worst.retention ? stage : worst
+    ));
+  }, [funnelStages]);
 
   const topReasons = useMemo(() => {
     if (!latest?.motivos || typeof latest.motivos !== "object") return [];
@@ -219,13 +256,24 @@ function ObservabilityPage() {
                       <SmallMetric label="Bloqueos rentabilidad" value={Number(counts.rentabilidad_pre_bloqueados || 0) + Number(counts.rentabilidad_post_bloqueados || 0)} detail="05E solo si el gate fue aplicado" />
                       <SmallMetric label="Rechazos de riesgo" value={counts.riesgo_rechazadas} detail="MotorRiesgo mantuvo autoridad" />
                     </div>
+
+                    {biggestDrop && (
+                      <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-300">Mayor caída del ciclo</p>
+                        <p className="mt-1 text-sm text-slate-300">
+                          <span className="font-semibold text-white">{biggestDrop.label}</span>: {biggestDrop.previous} → {biggestDrop.value} candidatos · {pctLabel(100 - biggestDrop.retention)} de caída.
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-500">Diagnóstico descriptivo; no cambia el ranking ni las decisiones del bot.</p>
+                      </div>
+                    )}
+
                     <div className="mt-5 space-y-4">
-                      <FunnelStage label="Universo" value={universe} max={funnelMax} detail="Activos evaluables al inicio" />
-                      <FunnelStage label="Elegibilidad" value={afterEligibility} max={funnelMax} detail="Compras ejecutables + posiciones preservadas" />
-                      <FunnelStage label="Scanner" value={afterScanner} max={funnelMax} detail="Top-N + posiciones abiertas" />
-                      <FunnelStage label="Motor de decisión" value={engineResults} max={funnelMax} detail={latest.decision_engine || "—"} />
-                      <FunnelStage label="Riesgo aprobado" value={riskApproved} max={funnelMax} detail="MotorRiesgo" />
-                      <FunnelStage label="Ejecuciones" value={executions} max={funnelMax} detail="Fills registrados" />
+                      <FunnelStage label="Universo" value={universe} max={funnelMax} detail="Activos evaluables al inicio · 100% referencia" />
+                      <FunnelStage label="Elegibilidad" value={afterEligibility} max={funnelMax} previous={universe} detail="Compras ejecutables + posiciones preservadas" />
+                      <FunnelStage label="Scanner" value={afterScanner} max={funnelMax} previous={afterEligibility} detail="Top-N + posiciones abiertas" />
+                      <FunnelStage label="Motor de decisión" value={engineResults} max={funnelMax} previous={afterScanner} detail={latest.decision_engine || "—"} />
+                      <FunnelStage label="Riesgo aprobado" value={riskApproved} max={funnelMax} previous={engineResults} detail="MotorRiesgo" />
+                      <FunnelStage label="Ejecuciones" value={executions} max={funnelMax} previous={riskApproved} detail="Fills registrados" />
                     </div>
                   </>
                 ) : (
