@@ -16,6 +16,14 @@ def test_readiness_route_devuelve_solo_resumen_publico(monkeypatch):
         "status": "NOT_READY",
         "blockers": 2,
         "warnings": 1,
+        "fee_evidence": {
+            "status": "NO_DISPONIBLE",
+            "source": None,
+            "bps_per_side": None,
+            "verified_at": None,
+            "age_seconds": None,
+            "max_age_seconds": 604800,
+        },
         "checks": [
             {"codigo": "BINANCE_FEE_SOURCE", "nivel": "BLOCKER", "detalle": "sensible"},
             {"codigo": "DECISION_ENGINE", "nivel": "BLOCKER", "detalle": "sensible"},
@@ -39,6 +47,14 @@ def test_readiness_route_devuelve_solo_resumen_publico(monkeypatch):
         "status": "NOT_READY",
         "blockers": 2,
         "warnings": 1,
+        "fee": {
+            "status": "NO_DISPONIBLE",
+            "source": None,
+            "bps_per_side": None,
+            "verified_at": None,
+            "age_seconds": None,
+            "max_age_seconds": 604800,
+        },
     }
     assert "checks" not in resultado
     assert "BINANCE_FEE_SOURCE" not in repr(resultado)
