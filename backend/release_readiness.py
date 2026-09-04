@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from backend.economia.fee_verificada import diagnosticar_fee_taker_manual
+
 
 PAPER_V1_INITIAL_CAPITAL_USD = 500.0
 
@@ -20,7 +22,14 @@ class Check:
     detalle: str
 
 
-def evaluar(config, esquema, *, profitability_gate_enabled: bool, environ=None):
+def evaluar(
+    config,
+    esquema,
+    *,
+    profitability_gate_enabled: bool,
+    environ=None,
+    now=None,
+):
     env = os.environ if environ is None else environ
     checks: list[Check] = []
 
@@ -90,14 +99,68 @@ def evaluar(config, esquema, *, profitability_gate_enabled: bool, environ=None):
     else:
         add("DECISION_ENGINE", "OK", f"motor={engine}")
 
-    if getattr(config, "BINANCE_API_KEY", None) and getattr(config, "BINANCE_API_SECRET", None):
-        add("BINANCE_FEE_SOURCE", "OK", "credenciales disponibles para leer fee taker real de la cuenta")
-    else:
+    fee_manual = diagnosticar_fee_taker_manual(now, environ=env)
+    tiene_credenciales_binance = bool(
+        getattr(config, "BINANCE_API_KEY", None)
+        and getattr(config, "BINANCE_API_SECRET", None)
+    )
+    if fee_manual["status"] == "VERIFICADA":
+        add(
+            "BINANCE_FEE_SOURCE",
+            "OK",
+            "fee taker verificada manualmente y vigente",
+        )
+        fee_evidence = {
+            "status": "VERIFICADA",
+            "source": "MANUAL_VERIFIED",
+            "bps_per_side": float(fee_manual["fee_taker_bps_por_lado"]),
+            "verified_at": fee_manual["fee_verified_at"],
+            "age_seconds": float(fee_manual["age_seconds"]),
+            "max_age_seconds": int(fee_manual["max_age_seconds"]),
+        }
+    elif fee_manual["status"] == "VENCIDA":
         add(
             "BINANCE_FEE_SOURCE",
             "BLOCKER",
-            "faltan credenciales Binance; PAPER fallara cerrado al no conocer la fee taker real",
+            "la fee taker manual esta vencida; PAPER falla cerrado hasta revalidarla",
         )
+        fee_evidence = {
+            "status": "VENCIDA",
+            "source": "MANUAL_VERIFIED",
+            "bps_per_side": float(fee_manual["fee_taker_bps_por_lado"]),
+            "verified_at": fee_manual["fee_verified_at"],
+            "age_seconds": float(fee_manual["age_seconds"]),
+            "max_age_seconds": int(fee_manual["max_age_seconds"]),
+        }
+    elif tiene_credenciales_binance:
+        add(
+            "BINANCE_FEE_SOURCE",
+            "WARN",
+            "hay credenciales Binance para leer la fee, pero readiness no hace red y no la declara verificada",
+        )
+        fee_evidence = {
+            "status": "CUENTA_DISPONIBLE_SIN_VERIFICAR",
+            "source": "BINANCE_ACCOUNT",
+            "bps_per_side": None,
+            "verified_at": None,
+            "age_seconds": None,
+            "max_age_seconds": int(fee_manual["max_age_seconds"]),
+        }
+    else:
+        detalle = (
+            "fee taker manual invalida; PAPER falla cerrado"
+            if fee_manual["status"] == "INVALIDA"
+            else "no hay fee taker verificable; PAPER falla cerrado"
+        )
+        add("BINANCE_FEE_SOURCE", "BLOCKER", detalle)
+        fee_evidence = {
+            "status": fee_manual["status"],
+            "source": None,
+            "bps_per_side": None,
+            "verified_at": None,
+            "age_seconds": None,
+            "max_age_seconds": int(fee_manual["max_age_seconds"]),
+        }
 
     cors = tuple(getattr(config, "CORS_ORIGINS", ()) or ())
     if cors and "*" not in cors:
@@ -122,16 +185,26 @@ def evaluar(config, esquema, *, profitability_gate_enabled: bool, environ=None):
         "status": "READY" if not blockers else "NOT_READY",
         "blockers": len(blockers),
         "warnings": len(warnings),
+        "fee_evidence": fee_evidence,
         "checks": [c.__dict__ for c in checks],
     }
 
 
 def resumen_publico(resultado):
-    """Vista segura para /health: no expone detalles ni presencia de secretos."""
+    """Vista segura para /health: no expone secretos ni valores de credenciales."""
+    fee = resultado.get("fee_evidence") or {}
     return {
         "release": resultado["release"],
         "ready": bool(resultado["ready"]),
         "status": resultado["status"],
         "blockers": int(resultado["blockers"]),
         "warnings": int(resultado["warnings"]),
+        "fee": {
+            "status": fee.get("status", "NO_DISPONIBLE"),
+            "source": fee.get("source"),
+            "bps_per_side": fee.get("bps_per_side"),
+            "verified_at": fee.get("verified_at"),
+            "age_seconds": fee.get("age_seconds"),
+            "max_age_seconds": fee.get("max_age_seconds"),
+        },
     }
