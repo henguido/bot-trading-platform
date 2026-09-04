@@ -30,6 +30,14 @@ def test_lanzador_local_usa_localhost_compatible_con_cors_y_api_frontend():
     assert '[string]$HostAddress = "127.0.0.1"' not in texto
 
 
+def test_lanzador_fuerza_utf8_para_python_en_windows():
+    texto = LAUNCHER.read_text(encoding="utf-8")
+    assert '$env:PYTHONUTF8 = "1"' in texto
+    assert '$env:PYTHONIOENCODING = "utf-8"' in texto
+    assert texto.index('$env:PYTHONUTF8 = "1"') < texto.index('scripts\\check_paper_release.py')
+    assert texto.index('$env:PYTHONUTF8 = "1"') < texto.index('"uvicorn"')
+
+
 def test_lanzador_no_migra_no_instala_dependencias_y_no_habilita_live():
     texto = LAUNCHER.read_text(encoding="utf-8")
     prohibidos = (
