@@ -1,5 +1,6 @@
 const RAW_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 export const BASE_URL = RAW_BASE_URL.replace(/\/+$/, "");
+export const DEFAULT_TIMEOUT_MS = 15000;
 
 async function detalleError(response) {
   try {
@@ -10,7 +11,50 @@ async function detalleError(response) {
   }
 }
 
-export async function apiFetch(path, options = {}, { auth = true } = {}) {
+function timeoutError(timeoutMs) {
+  const error = new Error(`La API no respondió en ${Math.round(timeoutMs / 1000)} s`);
+  error.code = "API_TIMEOUT";
+  error.timeout = true;
+  return error;
+}
+
+async function fetchConTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const externalSignal = options.signal;
+  let timeoutTriggered = false;
+
+  const abortarPorCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortarPorCaller();
+    } else {
+      externalSignal.addEventListener("abort", abortarPorCaller, { once: true });
+    }
+  }
+
+  const timer = setTimeout(() => {
+    timeoutTriggered = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (timeoutTriggered && error?.name === "AbortError") {
+      throw timeoutError(timeoutMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener?.("abort", abortarPorCaller);
+  }
+}
+
+export async function apiFetch(
+  path,
+  options = {},
+  { auth = true, timeoutMs = DEFAULT_TIMEOUT_MS } = {},
+) {
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -23,7 +67,11 @@ export async function apiFetch(path, options = {}, { auth = true } = {}) {
     }
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const response = await fetchConTimeout(
+    `${BASE_URL}${path}`,
+    { ...options, headers },
+    timeoutMs,
+  );
   if (!response.ok) {
     if (auth && response.status === 401) {
       localStorage.removeItem("token");
@@ -79,9 +127,10 @@ export async function downloadPaperJournal(formato = "csv") {
   const token = localStorage.getItem("token");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(
+  const response = await fetchConTimeout(
     `${BASE_URL}/api/paper/journal/export?formato=${seguro}`,
     { headers },
+    DEFAULT_TIMEOUT_MS,
   );
   if (!response.ok) {
     if (response.status === 401) {
