@@ -27,6 +27,7 @@ from backend import scanner
 from backend.config import settings
 from backend.connectors.crypto.binance_public_market import BinancePublicMarketData
 from backend.utils.asset_collector import get_available_assets
+from backend.economia.fee_verificada import fee_taker_manual_verificada
 
 STATE = RAIZ_REPO / "artifacts" / "scanner-unified-shadow-05i-state.json"
 SUMMARY = RAIZ_REPO / "artifacts" / "scanner-unified-shadow-05i-summary.json"
@@ -231,11 +232,17 @@ def construir_resumen(state: dict) -> dict:
     }
 
 
-def _fee_taker_si_disponible():
-    if not settings.BINANCE_API_KEY or not settings.BINANCE_API_SECRET:
-        return None
-    _activos, _balances, _symbols_info, costes = get_available_assets(incluir_costes_cuenta=True)
-    return costes.get("fee_taker_bps_por_lado")
+def _fee_taker_si_disponible(now=None):
+    if settings.BINANCE_API_KEY and settings.BINANCE_API_SECRET:
+        _activos, _balances, _symbols_info, costes = get_available_assets(
+            incluir_costes_cuenta=True
+        )
+        fee = costes.get("fee_taker_bps_por_lado")
+        if fee is not None:
+            return fee
+
+    manual = fee_taker_manual_verificada(now)
+    return manual["fee_taker_bps_por_lado"] if manual else None
 
 
 def _observar(state: dict, binance: BinancePublicMarketData, now: datetime) -> int:
@@ -249,7 +256,7 @@ def _observar(state: dict, binance: BinancePublicMarketData, now: datetime) -> i
     if not symbols_info or not snapshot or not metricas_raw:
         return 0
 
-    fee = _fee_taker_si_disponible()
+    fee = _fee_taker_si_disponible(now)
     activos = [
         fila for fila in symbols_info.values()
         if fila.get("quoteAsset") == "USDT"

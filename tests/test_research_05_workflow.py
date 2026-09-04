@@ -38,6 +38,19 @@ def test_workflow_05_no_bloquea_alpha_publico_si_falta_fee_privada():
     assert "05I/05J continuaran con evidencia publica" in texto
 
 
+def test_workflow_05_declara_fee_manual_verificada_y_sus_disparadores():
+    texto = _texto()
+    assert 'RESEARCH_TAKER_FEE_BPS: "10.0"' in texto
+    assert (
+        'RESEARCH_TAKER_FEE_SOURCE: '
+        '"manual:binance_account.commissionRates.taker"'
+    ) in texto
+    assert 'RESEARCH_TAKER_FEE_VERIFIED_AT: "2026-09-04T18:47:00Z"' in texto
+    assert "La validez temporal se verifica fail-closed dentro de Python." in texto
+    assert '"backend/economia/fee_verificada.py"' in texto
+    assert '"tests/test_fee_verificada_05k.py"' in texto
+
+
 def test_workflow_05_persiste_estado_y_publica_evidencia():
     texto = _texto()
     assert "actions/cache/restore@v4" in texto
