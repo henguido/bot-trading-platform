@@ -41,6 +41,7 @@ def test_workflow_05_persiste_estado_y_publica_evidencia():
     texto = _texto()
     assert "actions/cache/restore@v4" in texto
     assert "actions/cache/save@v4" in texto
+    assert "research-05-state-${{ github.run_id }}-${{ github.run_attempt }}" in texto
     assert "artifacts/scanner-unified-shadow-05i-state.json" in texto
     assert "artifacts/strategy-execution-shadow-05k-state.json" in texto
     assert "artifacts/scanner-challenger-05j.json" in texto
