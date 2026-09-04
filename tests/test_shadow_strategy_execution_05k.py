@@ -171,3 +171,24 @@ def test_resumen_declara_filtros_exchange_y_cero_ordenes():
     assert resumen["exchange_min_notional_checked"] is True
     assert resumen["exchange_lot_size_checked"] is True
     assert resumen["exchange_filters_source"] == "BINANCE_EXCHANGE_INFO_CURRENT"
+
+
+def test_main_05k_instancia_cliente_publico_sin_credenciales(monkeypatch):
+    cliente_publico = object()
+    usado = {}
+
+    monkeypatch.setattr(s.settings, "MODO_REAL", False)
+    monkeypatch.setattr(s, "BinancePublicMarketData", lambda: cliente_publico)
+    monkeypatch.setattr(s, "cargar_05i", lambda: {"observations": []})
+    monkeypatch.setattr(s, "cargar_estado", lambda: s.nuevo_estado(500.0))
+    monkeypatch.setattr(s, "_guardar", lambda *args, **kwargs: None)
+
+    def procesar_falso(estado_05i, state, binance, now):
+        usado["binance"] = binance
+        return 0, 0, s.construir_resumen(state)
+
+    monkeypatch.setattr(s, "procesar", procesar_falso)
+
+    s.main()
+
+    assert usado["binance"] is cliente_publico
