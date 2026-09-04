@@ -3,6 +3,8 @@
 El objetivo no es probar SQLite en si, sino el contrato de produccion: el estado
 PAPER debe reconstruirse desde `paper_operaciones`, no desde memoria del proceso.
 """
+import importlib
+import os
 from pathlib import Path
 
 import pytest
@@ -18,10 +20,23 @@ RAIZ = Path(__file__).resolve().parents[1]
 
 
 def _migrar(url: str) -> None:
-    cfg = Config(str(RAIZ / "alembic.ini"))
-    cfg.set_main_option("script_location", str(RAIZ / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", url)
-    command.upgrade(cfg, "0006_paper_ledger")
+    """Migra exactamente la BD temporal; env.py toma DATABASE_URL, no alembic.ini."""
+    previo = os.environ.get("DATABASE_URL")
+    try:
+        os.environ["DATABASE_URL"] = url
+        from backend.config import settings
+        importlib.reload(settings)
+
+        cfg = Config(str(RAIZ / "alembic.ini"))
+        cfg.set_main_option("script_location", str(RAIZ / "migrations"))
+        command.upgrade(cfg, "0006_paper_ledger")
+    finally:
+        if previo is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previo
+        from backend.config import settings
+        importlib.reload(settings)
 
 
 def test_restart_reconstruye_capital_posicion_fees_y_pnl_desde_db(tmp_path):
