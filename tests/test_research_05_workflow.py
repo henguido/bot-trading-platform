@@ -14,7 +14,8 @@ def test_workflow_05_corre_cada_4h_y_en_orden_05i_05j_05k():
     i = texto.index("python scripts/shadow_scanner_unified_05i.py")
     j = texto.index("python scripts/analyze_scanner_challenger_05j.py")
     k = texto.index("python scripts/shadow_strategy_execution_05k.py")
-    assert i < j < k
+    v = texto.index("python scripts/verdict_research_05.py")
+    assert i < j < k < v
 
 
 def test_workflow_05_es_fail_closed_en_paper_y_no_habilita_live():
@@ -46,4 +47,5 @@ def test_workflow_05_persiste_estado_y_publica_evidencia():
     assert "artifacts/strategy-execution-shadow-05k-state.json" in texto
     assert "artifacts/scanner-challenger-05j.json" in texto
     assert "artifacts/research-05-status.txt" in texto
+    assert "artifacts/research-05-verdict.json" in texto
     assert "retention-days: 30" in texto
