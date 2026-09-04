@@ -22,6 +22,12 @@ $BackendUrl = "http://${HostAddress}:${BackendPort}"
 
 Set-Location $Root
 
+# Windows puede heredar cp1252 para stdout/stderr. El backend contiene mensajes
+# Unicode historicos y una impresion no representable no debe derribar el loop.
+# Estas variables solo afectan los procesos Python hijos de este lanzador.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
 function Fail([string]$Message) {
     Write-Host ""
     Write-Host "[BOT PAPER] NO SE PUDO INICIAR" -ForegroundColor Red
