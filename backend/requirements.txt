@@ -3,9 +3,9 @@
 # Instalar con:             pip install -r backend/requirements.txt
 # Instalacion REPRODUCIBLE: pip install -r backend/requirements.txt -c constraints.txt
 #
-# constraints.txt (en la raiz) fija el conjunto exacto verificado con 286/286
-# pruebas. Sin el, pip resuelve la version mas reciente de cada paquete y dos
-# reconstrucciones pueden instalar conjuntos distintos.
+# constraints.txt (en la raiz) fija el conjunto exacto verificado. Sin el,
+# pip resuelve la version mas reciente de cada paquete y dos reconstrucciones
+# pueden instalar conjuntos distintos.
 
 fastapi
 uvicorn
@@ -16,6 +16,10 @@ aiohttp
 cryptography
 requests
 passlib[bcrypt]
+# passlib 1.7.4 no es compatible con bcrypt 5.x en su backend probe.
+# El limite se declara tambien aqui para que una instalacion SIN constraints
+# no vuelva a romper hash/verify de contrasenas.
+bcrypt<5
 python-jose[cryptography]
 psycopg2-binary
 email-validator
@@ -30,8 +34,7 @@ email-validator
 #             Llegaba via dateparser <- python-binance.
 #   pydantic  importado por backend/app/schemas.py. Llegaba via fastapi.
 #
-# Sin pin, igual que el resto de este archivo. Versiones con las que se
-# verificaron 286/286 pruebas en Python 3.13.3:
+# Sin pin, igual que el resto de este archivo. Versiones de referencia:
 #   pytz==2026.3.post1   pydantic==2.13.4
 pytz
 pydantic
