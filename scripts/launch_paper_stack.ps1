@@ -147,7 +147,9 @@ try {
     }
 
     Write-Host "[BOT PAPER] 3/4 Ejecutando smoke runtime de solo lectura..." -ForegroundColor Cyan
-    & $Python "scripts\smoke_paper_runtime.py" "--base-url" $BackendUrl
+    # Ejecutarlo como modulo conserva la raiz del repositorio en sys.path y
+    # evita ModuleNotFoundError al importar backend.* desde Windows.
+    & $Python "-m" "scripts.smoke_paper_runtime" "--base-url" $BackendUrl
     if ($LASTEXITCODE -ne 0) {
         throw "El smoke runtime PAPER no quedo READY."
     }
