@@ -1,6 +1,17 @@
 from scripts.verdict_research_05 import MIN_BUCKETS, bootstrap_mean_ci95, construir_veredicto
 
 
+def _costes_ejecutables():
+    return {
+        "orderbook_calls": 100,
+        "exchange_info_calls": 10,
+        "portfolios": {
+            "BASE_05I": {"fees_executed_usd": 0.25},
+            "CHALLENGER_05J": {"fees_executed_usd": 0.25},
+        },
+    }
+
+
 def test_bootstrap_es_determinista_y_detecta_muestra_positiva():
     a = bootstrap_mean_ci95([10, 12, 14, 16, 18], samples=2000, seed=7)
     b = bootstrap_mean_ci95([10, 12, 14, 16, 18], samples=2000, seed=7)
@@ -26,8 +37,7 @@ def test_treinta_buckets_netos_positivos_siguen_requiriendo_revision_humana():
     j = {"buckets": [{"challenger_minus_base_top_gross_bps": 10 + n % 2} for n in range(MIN_BUCKETS)]}
     k = {
         "paired_buckets": [{"challenger_minus_base_net_bps": 5 + n % 2} for n in range(MIN_BUCKETS)],
-        "orderbook_calls": 100,
-        "exchange_info_calls": 10,
+        **_costes_ejecutables(),
     }
     v = construir_veredicto(i, j, k)
     assert v["blockers"] == []
@@ -41,8 +51,7 @@ def test_evidencia_negativa_con_muestra_suficiente_bloquea_promocion():
     j = {"buckets": [{"challenger_minus_base_top_gross_bps": -10 - n % 2} for n in range(MIN_BUCKETS)]}
     k = {
         "paired_buckets": [{"challenger_minus_base_net_bps": -5 - n % 2} for n in range(MIN_BUCKETS)],
-        "orderbook_calls": 100,
-        "exchange_info_calls": 10,
+        **_costes_ejecutables(),
     }
     v = construir_veredicto(i, j, k)
     assert v["status"] == "EVIDENCE_AGAINST_PROMOTION"
