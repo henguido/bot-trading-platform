@@ -266,18 +266,22 @@ function DashboardPage() {
                 <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Gate de rentabilidad</p>
                 <div className="mt-3">
                   <StatusPill ok={Boolean(operativo?.profitability_gate_05e_enabled)}>
-                    {operativo?.profitability_gate_05e_enabled ? "05E activo" : "05E pendiente"}
+                    {operativo?.profitability_gate_05e_enabled ? "05E activo" : "05E apagado"}
                   </StatusPill>
                 </div>
                 <p className="mt-3 text-xs leading-5 text-slate-500">
-                  {operativo?.profitability_gate_05e_status || "Sin telemetría"}
+                  {operativo?.profitability_gate_05e_enabled
+                    ? "Filtro promovido y activo en PAPER."
+                    : "Apagado por seguridad: evidencia OOS insuficiente para promoverlo."}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                 <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">Ejecución PAPER</p>
                 <p className="mt-2 text-sm font-semibold text-slate-200">Order book + VWAP</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Fee taker y slippage modelados; LIVE deshabilitado.</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Slippage se modela con datos disponibles; fee taker solo con fuente verificable. Desconocido ≠ 0. LIVE deshabilitado.
+                </p>
               </div>
             </section>
 
