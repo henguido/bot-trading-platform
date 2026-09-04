@@ -24,6 +24,12 @@ def test_lanzador_ejecuta_smoke_como_modulo_desde_raiz_repo():
     assert "Set-Location $Root" in texto
 
 
+def test_lanzador_local_usa_localhost_compatible_con_cors_y_api_frontend():
+    texto = LAUNCHER.read_text(encoding="utf-8")
+    assert '[string]$HostAddress = "localhost"' in texto
+    assert '[string]$HostAddress = "127.0.0.1"' not in texto
+
+
 def test_lanzador_no_migra_no_instala_dependencias_y_no_habilita_live():
     texto = LAUNCHER.read_text(encoding="utf-8")
     prohibidos = (
