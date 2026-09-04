@@ -279,18 +279,6 @@ def trading_loop():
             simulator.latest_decisions = {}
             precios_actuales = {}
 
-            if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
-                noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
-                noticias_cache = noticias if noticias else []
-                timestamp_cache = ahora
-            else:
-                noticias = noticias_cache
-
-            textos = noticias if noticias else []
-            noticias_str = "\n".join(textos) if textos else "No hay noticias disponibles"
-            sentimiento = "NO DISPONIBLE"
-            print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
-
             try:
                 (assets_disponibles, balances_reales, symbols_info,
                  costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)
@@ -506,6 +494,21 @@ def trading_loop():
                     resumen_decision_ciclo.anotar_omision("SIN_CANDIDATOS_MOTOR")
                 esperar_ciclo = True
                 continue
+
+            # Contexto de noticias solo cuando el pipeline ya produjo finalistas.
+            # Conserva cache de una hora y el fallback explicito; la noticia no
+            # participa en elegibilidad, scanner, sizing ni MotorRiesgo.
+            if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
+                noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
+                noticias_cache = noticias if noticias else []
+                timestamp_cache = ahora
+            else:
+                noticias = noticias_cache
+
+            textos = noticias if noticias else []
+            noticias_str = "\n".join(textos) if textos else "No hay noticias disponibles"
+            sentimiento = "NO DISPONIBLE"
+            print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             portafolio_contexto = portafolio_para_llm(cartera)
             usdt_disponible = cartera.capital_disponible()
