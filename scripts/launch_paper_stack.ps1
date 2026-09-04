@@ -44,16 +44,10 @@ function Process-Alive([string]$PidFile) {
 
 function Port-In-Use([int]$Port) {
     try {
-        return @(
-            Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
-        ).Count -gt 0
+        return @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop).Count -gt 0
     }
     catch {
-        # Fallback compatible con equipos donde Get-NetTCPConnection no este disponible.
-        $listener = [System.Net.Sockets.TcpListener]::new(
-            [System.Net.IPAddress]::Loopback,
-            $Port
-        )
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
         try {
             $listener.Start()
             return $false
@@ -115,15 +109,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[BOT PAPER] 2/4 Iniciando backend..." -ForegroundColor Cyan
-$backend = Start-Process \
-    -FilePath $Python \
-    -ArgumentList @("-m", "uvicorn", "backend.main:app", "--host", $HostAddress, "--port", "$BackendPort", "--workers", "1") \
-    -WorkingDirectory $Root \
-    -RedirectStandardOutput $BackendOut \
-    -RedirectStandardError $BackendErr \
-    -PassThru
+$backendArgs = @(
+    "-m", "uvicorn", "backend.main:app",
+    "--host", $HostAddress,
+    "--port", "$BackendPort",
+    "--workers", "1"
+)
+$backendStart = @{
+    FilePath = $Python
+    ArgumentList = $backendArgs
+    WorkingDirectory = $Root
+    RedirectStandardOutput = $BackendOut
+    RedirectStandardError = $BackendErr
+    PassThru = $true
+}
+$backend = Start-Process @backendStart
 Set-Content -Path $BackendPidFile -Value $backend.Id -Encoding ascii
 
+$frontendProcess = $null
 try {
     $healthReady = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -150,13 +153,16 @@ try {
     }
 
     Write-Host "[BOT PAPER] 4/4 Iniciando frontend..." -ForegroundColor Cyan
-    $frontendProcess = Start-Process \
-        -FilePath $Node.Source \
-        -ArgumentList @($ViteEntry, "--host", $HostAddress, "--port", "$FrontendPort", "--strictPort") \
-        -WorkingDirectory $Frontend \
-        -RedirectStandardOutput $FrontendOut \
-        -RedirectStandardError $FrontendErr \
-        -PassThru
+    $frontendArgs = @($ViteEntry, "--host", $HostAddress, "--port", "$FrontendPort", "--strictPort")
+    $frontendStart = @{
+        FilePath = $Node.Source
+        ArgumentList = $frontendArgs
+        WorkingDirectory = $Frontend
+        RedirectStandardOutput = $FrontendOut
+        RedirectStandardError = $FrontendErr
+        PassThru = $true
+    }
+    $frontendProcess = Start-Process @frontendStart
     Set-Content -Path $FrontendPidFile -Value $frontendProcess.Id -Encoding ascii
 
     Start-Sleep -Seconds 2
