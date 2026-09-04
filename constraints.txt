@@ -14,6 +14,10 @@
 # paquetes que de todos modos se fueran a instalar. Por eso una entrada que en
 # Linux no aplique simplemente se ignora, en lugar de romper la instalacion.
 #
+# 2026-09-04: bcrypt 5.0.0 resulto incompatible con passlib 1.7.4 en el flujo
+# real de hash/verify de contrasenas. Se fija 4.0.1 y CI debe revalidar el
+# conjunto completo antes de considerarlo nuevamente baseline reproducible.
+#
 # Este archivo se REGENERA a mano. Si cambian los requirements, hay que
 # regenerarlo desde un venv que vuelva a pasar la verificacion completa.
 # La automatizacion (requirements.in -> pip-compile -> hashes) queda pendiente
@@ -26,7 +30,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
 attrs==26.1.0
-bcrypt==5.0.0
+bcrypt==4.0.1
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.1
