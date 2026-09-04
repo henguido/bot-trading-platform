@@ -38,7 +38,10 @@ def test_estado_operativo_deriva_capital_motor_y_evidencia_sin_red():
     assert salida["estrategias_con_cierres"] == 1
     assert salida["cierres_atribuidos"] == 2
     assert salida["evidencia_estrategias_status"] == "DISPONIBLE"
-    assert salida["paper_execution_model"] == "ORDER_BOOK_VWAP_TAKER_FEE"
+    assert salida["paper_execution_model"] == "ORDER_BOOK_VWAP_SLIPPAGE_FEE_VERIFICABLE"
+    assert salida["paper_fee_policy"] == (
+        "TAKER_FEE_SOLO_CON_FUENTE_VERIFICABLE; DESCONOCIDO_NO_ES_CERO"
+    )
     assert salida["paper_ledger_source"] == "PAPER_OPERACIONES"
 
     limites = salida["limites_riesgo"]
@@ -70,5 +73,7 @@ def test_estado_operativo_declara_incertidumbre_y_no_inventa_evidencia():
     assert salida["cierres_atribuidos"] == 0
     assert salida["evidencia_estrategias_status"] == "SIN_CIERRES_REALIZADOS"
     assert salida["profitability_gate_05e_enabled"] is False
-    assert salida["profitability_gate_05e_status"] == "PENDIENTE_EVIDENCIA_OOS"
+    assert salida["profitability_gate_05e_status"] == "APAGADO_EVIDENCIA_OOS_INSUFICIENTE"
+    assert "DESCONOCIDO_NO_ES_CERO" in salida["paper_fee_policy"]
+    assert any("05E apagado por seguridad" in mensaje for mensaje in salida["mensajes"])
     assert len(salida["mensajes"]) >= 2
