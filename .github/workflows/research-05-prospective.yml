@@ -78,7 +78,7 @@ jobs:
           path: |
             artifacts/scanner-unified-shadow-05i-state.json
             artifacts/strategy-execution-shadow-05k-state.json
-          key: research-05-state-${{ github.run_id }}
+          key: research-05-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             research-05-state-
 
@@ -101,7 +101,7 @@ jobs:
           path: |
             artifacts/scanner-unified-shadow-05i-state.json
             artifacts/strategy-execution-shadow-05k-state.json
-          key: research-05-state-${{ github.run_id }}
+          key: research-05-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload research evidence
         if: always()
