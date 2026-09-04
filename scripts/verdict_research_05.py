@@ -54,6 +54,31 @@ def bootstrap_mean_ci95(vals, *, samples: int = BOOTSTRAP_SAMPLES, seed: int = B
     return {"n": n, "mean": statistics.mean(xs), "median": statistics.median(xs), "ci95_low": lo, "ci95_high": hi}
 
 
+def _hay_costes_y_ejecucion_05k(k: dict) -> bool:
+    """Distingue disponibilidad de costes de suficiencia de buckets cerrados.
+
+    Un fill abierto con fee realmente aplicada ya demuestra que 05K puede usar
+    order book, filtros y coste taker. Eso no equivale a tener un bucket neto
+    completo; esa suficiencia se controla por separado con n_k/MIN_BUCKETS.
+    """
+    if int(k.get("orderbook_calls") or 0) <= 0:
+        return False
+    if int(k.get("exchange_info_calls") or 0) <= 0:
+        return False
+
+    portfolios = k.get("portfolios") or {}
+    for portfolio in portfolios.values():
+        try:
+            fees = float(portfolio.get("fees_executed_usd") or 0.0)
+            posiciones = int(portfolio.get("open_positions") or 0)
+            cerradas = int(portfolio.get("closed_trades") or 0)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if math.isfinite(fees) and fees > 0 and (posiciones > 0 or cerradas > 0):
+            return True
+    return False
+
+
 def construir_veredicto(i: dict, j: dict, k: dict) -> dict:
     alpha_i = [b.get("alpha_top_minus_control_bps") for b in i.get("buckets", [])]
     diff_j = [b.get("challenger_minus_base_top_gross_bps") for b in j.get("buckets", [])]
@@ -66,11 +91,7 @@ def construir_veredicto(i: dict, j: dict, k: dict) -> dict:
     n_i = len(_finite(alpha_i))
     n_j = len(_finite(diff_j))
     n_k = len(_finite(diff_k))
-    fees_available = (
-        int(k.get("orderbook_calls") or 0) > 0
-        and int(k.get("exchange_info_calls") or 0) > 0
-        and n_k > 0
-    )
+    fees_available = _hay_costes_y_ejecucion_05k(k)
 
     blockers = []
     if n_i < MIN_BUCKETS:
