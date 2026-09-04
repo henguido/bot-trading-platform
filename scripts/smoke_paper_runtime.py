@@ -26,6 +26,8 @@ from dataclasses import asdict, dataclass
 
 import requests
 
+from backend.esquema import ALINEADO
+
 
 @dataclass(frozen=True)
 class Check:
@@ -59,7 +61,7 @@ def evaluar_health(payload) -> dict:
         estado = esquema.get("estado")
         actual = esquema.get("revision_actual")
         esperada = esquema.get("revision_esperada")
-        alineado = estado == "ALINEADO" and actual is not None and actual == esperada
+        alineado = estado == ALINEADO and actual is not None and actual == esperada
         add(
             "ALEMBIC",
             alineado,
