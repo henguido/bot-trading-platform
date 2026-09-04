@@ -30,6 +30,13 @@ def test_lanzador_local_usa_localhost_compatible_con_cors_y_api_frontend():
     assert '[string]$HostAddress = "127.0.0.1"' not in texto
 
 
+def test_lanzador_fija_vite_api_al_backend_que_acaba_de_validar():
+    texto = LAUNCHER.read_text(encoding="utf-8")
+    asignacion = '$env:VITE_API_URL = $BackendUrl'
+    assert asignacion in texto
+    assert texto.index(asignacion) < texto.index('"--strictPort"')
+
+
 def test_lanzador_fuerza_utf8_para_python_en_windows():
     texto = LAUNCHER.read_text(encoding="utf-8")
     assert '$env:PYTHONUTF8 = "1"' in texto
