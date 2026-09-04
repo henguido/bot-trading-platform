@@ -12,9 +12,16 @@ def test_lanzador_ejecuta_readiness_y_smoke_antes_de_exponer_frontend():
     texto = LAUNCHER.read_text(encoding="utf-8")
     readiness = texto.index('scripts\\check_paper_release.py')
     backend = texto.index('"uvicorn"')
-    smoke = texto.index('scripts\\smoke_paper_runtime.py')
+    smoke = texto.index('"scripts.smoke_paper_runtime"')
     frontend = texto.index('"--strictPort"')
     assert readiness < backend < smoke < frontend
+
+
+def test_lanzador_ejecuta_smoke_como_modulo_desde_raiz_repo():
+    texto = LAUNCHER.read_text(encoding="utf-8")
+    assert '& $Python "-m" "scripts.smoke_paper_runtime"' in texto
+    assert '& $Python "scripts\\smoke_paper_runtime.py"' not in texto
+    assert "Set-Location $Root" in texto
 
 
 def test_lanzador_no_migra_no_instala_dependencias_y_no_habilita_live():
