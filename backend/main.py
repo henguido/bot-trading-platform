@@ -59,28 +59,13 @@ import pytz, traceback
 
 # ─────────────────────────────────────────────────────────────────────────────
 # P0-16 · ALEMBIC ES LA UNICA AUTORIDAD DEL ESQUEMA
-#
-# Aqui habia un models.Base.metadata.create_all(bind=engine) que se ejecutaba
-# AL IMPORTAR el modulo. Con DATABASE_URL apuntando a produccion, un simple
-# `import backend.main` (o arrancar uvicorn) abria conexion contra Render y
-# habria creado alli las tablas `ordenes` y `fills` FUERA de Alembic: la base
-# habria quedado con el esquema nuevo pero sin fila en alembic_version, y el
-# procedimiento `stamp 0001_baseline` ya no encajaria.
-#
-# El codigo de aplicacion NO modifica el esquema. Migrar es una operacion
-# explicita de despliegue:  alembic upgrade head
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    """
-    Unico punto de arranque y parada del bucle de trading (P0-13).
-
-    `coordinador` se resuelve como global EN TIEMPO DE EJECUCION, no al definir
-    esta funcion: se instancia mas abajo, cuando trading_loop ya existe.
-    """
-    coordinador.iniciar()          # no arranca si otro proceso es lider
+    """Unico punto de arranque y parada del bucle de trading (P0-13)."""
+    coordinador.iniciar()
     try:
         yield
     finally:
@@ -108,7 +93,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Instancias globales
 binance = BinanceConnector()
 openai = OpenAIConnector()
 simulator = Simulator()
@@ -116,42 +100,16 @@ alpaca = AlpacaConnector()
 news_connector = NewsConnector()
 real_trader = RealTradingConnector()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# P0-4 / P0-5
-#
-# Aqui habia un bloque que leia el estado del portafolio UNA SOLA VEZ, al
-# importar el modulo, y lo dejaba en las globales `usuario_id`, `estado`,
-# `ultimos_movimientos` y `ultimos_precios_venta`. Producia dos fallos:
-#
-#   P0-4: si no habia usuarios al arrancar, tres de esas globales no llegaban
-#         a definirse. Si alguien se registraba despues, el bucle lanzaba
-#         NameError en cada iteracion.
-#   P0-5: si si habia usuario, el precio promedio quedaba congelado en el valor
-#         del arranque para siempre, asi que el bot nunca conocia su coste base.
-#
-# El bloque no se ha reinicializado: se ha SUPRIMIDO. El estado persistente
-# vive ahora exclusivamente en la base de datos y se lee fresco en cada
-# iteracion mediante cargar_contexto_usuario(). Tampoco se siembran las
-# posiciones del Simulator desde la BD: el Simulator es un libro en memoria
-# para PAPER, no una fuente de estado persistente.
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def priorizar_activos_por_importancia(activos):
     return [a for a in activos if a["position_quantity"] > 0]
+
 
 motor_riesgo = MotorRiesgo()
 stop_trading = threading.Event()
 
 
 def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
-    """
-    Deja constancia de una operacion vetada por el motor.
-
-    Se reutiliza DecisionAudit, que ya existe: no hace falta migracion. Se
-    guarda con quantity=0 y action='RECHAZADA_RIESGO' para que jamas pueda
-    confundirse con una transaccion ejecutada.
-    """
     try:
         with SessionLocal() as db:
             guardar_auditoria_decision(
@@ -181,9 +139,6 @@ def registrar_rechazo_riesgo(veredicto, *, sentimiento, noticias):
         print(f"⚠️ No se pudo auditar el rechazo de riesgo: {type(e).__name__}: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ROBUSTEZ · INFORMAR DE UN ERROR NO PUEDE MATAR EL BUCLE
-# ─────────────────────────────────────────────────────────────────────────────
 def imprimir_resistente(texto, destino=None):
     try:
         print(texto, file=destino)
@@ -204,7 +159,6 @@ def reportar_error_de_ciclo(e, *, destino_rastro=None):
     except Exception:
         detalle = type(e).__name__
     imprimir_resistente(f"❌ Error inesperado en ciclo de trading: {detalle}")
-
     try:
         rastro = "".join(traceback.format_exception(type(e), e, e.__traceback__))
     except Exception:
@@ -213,12 +167,11 @@ def reportar_error_de_ciclo(e, *, destino_rastro=None):
 
 
 def get_min_notional(symbol, info_por_symbol):
-    """Minimo real del exchange; None significa desconocido, nunca un default."""
     filtros = elegibilidad.leer_filtros(info_por_symbol.get(symbol))
     return float(filtros.min_notional) if filtros is not None else None
 
+
 def _obtener_assets_con_costes(*, medidor=None):
-    """Normaliza 3/4 valores sin inventar costes."""
     try:
         resultado = get_available_assets(
             medidor=medidor, incluir_costes_cuenta=True)
@@ -242,7 +195,6 @@ def _obtener_assets_con_costes(*, medidor=None):
         "se esperaban 3 o 4")
 
 
-# Lógica principal del bot
 def trading_loop():
     ciclo = 0
     EVALUAR_CADA_N_CICLOS = 2
@@ -279,18 +231,6 @@ def trading_loop():
             simulator.latest_decisions = {}
             precios_actuales = {}
 
-            if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
-                noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
-                noticias_cache = noticias if noticias else []
-                timestamp_cache = ahora
-            else:
-                noticias = noticias_cache
-
-            textos = noticias if noticias else []
-            noticias_str = "\n".join(textos) if textos else "No hay noticias disponibles"
-            sentimiento = "NO DISPONIBLE"
-            print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
-
             try:
                 (assets_disponibles, balances_reales, symbols_info,
                  costes_cuenta) = _obtener_assets_con_costes(medidor=medidor)
@@ -310,8 +250,6 @@ def trading_loop():
                 ciclo += 1
                 continue
 
-            # El MISMO exchangeInfo del ciclo alimenta elegibilidad, riesgo y
-            # ahora también la ejecución PAPER. No hay una petición adicional.
             filters_dict = {s["symbol"]: s["filters"] for s in symbols_info}
             info_por_symbol = {s["symbol"]: s for s in symbols_info}
 
@@ -506,6 +444,22 @@ def trading_loop():
                     resumen_decision_ciclo.anotar_omision("SIN_CANDIDATOS_MOTOR")
                 esperar_ciclo = True
                 continue
+
+            # Noticias/contexto se consulta SOLO cuando ya existen finalistas.
+            # Asi una caida en elegibilidad/scanner no dispara APIs externas que
+            # no pueden influir en ninguna decision. El cache conserva el mismo
+            # contrato de una hora y un fallo sigue degradando a contexto vacio.
+            if not noticias_cache or (ahora - timestamp_cache).total_seconds() > 3600:
+                noticias = news_connector.obtener_noticias_combinadas(6, medidor=medidor)
+                noticias_cache = noticias if noticias else []
+                timestamp_cache = ahora
+            else:
+                noticias = noticias_cache
+
+            textos = noticias if noticias else []
+            noticias_str = "\n".join(textos) if textos else "No hay noticias disponibles"
+            sentimiento = "NO DISPONIBLE"
+            print(f"🧑‍🤖 Sentimiento del mercado: {sentimiento}")
 
             portafolio_contexto = portafolio_para_llm(cartera)
             usdt_disponible = cartera.capital_disponible()
@@ -722,9 +676,6 @@ def trading_loop():
                 stop_trading.wait(settings.WAIT_TIME)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CICLO DE VIDA (P0-13)
-# ─────────────────────────────────────────────────────────────────────────────
 def _precondicion_esquema():
     from backend.esquema import ALINEADO, estado_esquema
 
@@ -764,7 +715,7 @@ def _estado_esquema_serializado():
     return {"estado": e.estado, "revision_actual": e.revision_actual,
             "revision_esperada": e.revision_esperada, "detalle": e.detalle}
 
-# Rutas
+
 @app.get("/api/historial")
 def get_historial(
     db: Session = Depends(get_db),
@@ -798,6 +749,7 @@ def get_historial(
         })
 
     return historial
+
 
 @app.get("/api/resumen")
 def resumen_portafolio(
@@ -869,6 +821,7 @@ def resumen_portafolio(
                          motivo="al menos un activo carece de coste base"))
     return salida
 
+
 @app.post("/login")
 def login(form_data: dict = Body(...), db: Session = Depends(get_db)):
     email = form_data.get("email")
@@ -884,6 +837,7 @@ def login(form_data: dict = Body(...), db: Session = Depends(get_db)):
         "token_type": "bearer",
         "nombre": user.nombre
     }
+
 
 @app.post("/signup")
 def signup(form_data: UserCreate, db: Session = Depends(get_db)):
