@@ -1,5 +1,5 @@
 param(
-    [string]$HostAddress = "127.0.0.1",
+    [string]$HostAddress = "localhost",
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
     [switch]$NoBrowser
