@@ -22,9 +22,8 @@ $BackendUrl = "http://${HostAddress}:${BackendPort}"
 
 Set-Location $Root
 
-# Windows puede heredar cp1252 para stdout/stderr. El backend contiene mensajes
-# Unicode historicos y una impresion no representable no debe derribar el loop.
-# Estas variables solo afectan los procesos Python hijos de este lanzador.
+# El lanzador debe ser reproducible en Windows aunque la consola herede cp1252.
+# Fuerza UTF-8 solo en los procesos hijos iniciados desde esta sesion.
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
@@ -161,6 +160,10 @@ try {
     }
 
     Write-Host "[BOT PAPER] 4/4 Iniciando frontend..." -ForegroundColor Cyan
+    # La UI local debe hablar SIEMPRE con el backend que acaba de validar este
+    # mismo lanzador. Una frontend/.env antigua o un VITE_API_URL heredado no
+    # puede redirigir login/signup a otra instancia.
+    $env:VITE_API_URL = $BackendUrl
     $frontendArgs = @($ViteEntry, "--host", $HostAddress, "--port", "$FrontendPort", "--strictPort")
     $frontendStart = @{
         FilePath = $Node.Source
