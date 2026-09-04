@@ -734,7 +734,7 @@ def test_noticias_cuenta_una_peticion_por_proveedor(monkeypatch):
     conector.api_key = AUTH_TOKEN_FALSO
     conector.newsapi_key = API_KEY_FALSA
 
-    def get_falso(url, params=None):
+    def get_falso(url, params=None, timeout=None):
         return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
                                json=lambda: {"results": [{"title": "t"}],
                                              "articles": [{"title": "a"}]})
@@ -755,7 +755,7 @@ def test_un_403_de_cryptopanic_se_cuenta_como_error(monkeypatch):
     conector = nc.NewsConnector()
     conector.api_key = AUTH_TOKEN_FALSO
 
-    def get_403(url, params=None):
+    def get_403(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"403 Client Error for url: {url}?auth_token={AUTH_TOKEN_FALSO}")
@@ -852,7 +852,7 @@ def test_el_auth_token_no_llega_a_consola_en_un_fallo(monkeypatch, capsys):
     conector = nc.NewsConnector()
     conector.api_key = AUTH_TOKEN_FALSO
 
-    def get_403(url, params=None):
+    def get_403(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"403 Client Error for url: {url}?auth_token={AUTH_TOKEN_FALSO}"
@@ -874,7 +874,7 @@ def test_la_apikey_de_newsapi_no_llega_a_consola(monkeypatch, capsys):
     conector = nc.NewsConnector()
     conector.newsapi_key = API_KEY_FALSA
 
-    def get_401(url, params=None):
+    def get_401(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"401 Client Error for url: {url}?apiKey={API_KEY_FALSA}")
