@@ -4,6 +4,10 @@ import requests
 from backend.config import settings
 from backend.telemetria_http import MEDIDOR_NULO, OPERACION_NULA, describir_error
 
+# Timeout acotado para contexto externo. Las noticias son contexto auxiliar:
+# nunca deben poder dejar bloqueado indefinidamente el hilo de trading.
+NEWS_REQUEST_TIMEOUT_SECONDS = 10
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EXPOSICION DE SECRETOS EN LOGS  (corregido en la fase BOT 2.0-02A)
 #
@@ -15,8 +19,8 @@ from backend.telemetria_http import MEDIDOR_NULO, OPERACION_NULA, describir_erro
 # Ahora todo mensaje de excepcion pasa por `describir_error`, que conserva la
 # clase y el texto pero elimina los valores de las claves sensibles.
 #
-# ⚠️ La credencial de CryptoPanic ya expuesta debe considerarse COMPROMETIDA y
-#    rotarse MANUALMENTE. Eso no se hace -ni se puede hacer- desde el codigo.
+# La credencial de CryptoPanic ya expuesta debe considerarse COMPROMETIDA y
+# rotarse MANUALMENTE. Eso no se hace -ni se puede hacer- desde el codigo.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -29,9 +33,12 @@ class NewsConnector:
 
     def obtener_noticias_recientes(self, numero_noticias=5, breaking_news=False,
                                    medicion=None):
-        """
-        Obtiene las noticias recientes de CryptoPanic (cripto).
-        """
+        """Obtiene noticias recientes de CryptoPanic (cripto)."""
+        # Sin credencial no hacemos una peticion destinada a fallar. Contexto
+        # ausente sigue siendo [] y aguas arriba se expresa como NO DISPONIBLE.
+        if not self.api_key:
+            return []
+
         params = {
             "auth_token": self.api_key,
             "filter": "important" if breaking_news else "",
@@ -42,22 +49,25 @@ class NewsConnector:
         op = medicion if medicion is not None else OPERACION_NULA
         try:
             with op.peticion() as p:
-                response = requests.get(self.base_url, params=params)
+                response = requests.get(
+                    self.base_url,
+                    params=params,
+                    timeout=NEWS_REQUEST_TIMEOUT_SECONDS,
+                )
                 p.anotar_status(getattr(response, "status_code", None))
                 response.raise_for_status()
             datos = response.json()
             posts = datos.get('results', [])[:numero_noticias]
-            titulares = [post['title'] for post in posts]
-            return titulares
+            return [post['title'] for post in posts]
         except Exception as e:
-            # Sin sanear, este mensaje publicaria la URL con auth_token dentro.
-            print(f"❌ Error al obtener noticias de CryptoPanic: {describir_error(e)}")
+            print(f"Error al obtener noticias de CryptoPanic: {describir_error(e)}")
             return []
 
     def obtener_noticias_stocks(self, numero_noticias=3, medicion=None):
-        """
-        Obtiene noticias reales del mercado de acciones usando NewsAPI.
-        """
+        """Obtiene noticias del mercado de acciones usando NewsAPI."""
+        if not self.newsapi_key:
+            return []
+
         params = {
             "q": "Apple OR Tesla OR Amazon OR Microsoft OR stock market",
             "sortBy": "publishedAt",
@@ -68,19 +78,24 @@ class NewsConnector:
         op = medicion if medicion is not None else OPERACION_NULA
         try:
             with op.peticion() as p:
-                response = requests.get(self.newsapi_url, params=params)
+                response = requests.get(
+                    self.newsapi_url,
+                    params=params,
+                    timeout=NEWS_REQUEST_TIMEOUT_SECONDS,
+                )
                 p.anotar_status(getattr(response, "status_code", None))
                 response.raise_for_status()
             data = response.json()
             return [article["title"] for article in data.get("articles", [])[:numero_noticias]]
         except Exception as e:
-            print(f"❌ Error al obtener noticias de acciones (NewsAPI): {describir_error(e)}")
+            print(f"Error al obtener noticias de acciones (NewsAPI): {describir_error(e)}")
             return []
 
     def obtener_noticias_forex(self, numero_noticias=3, medicion=None):
-        """
-        Obtiene noticias reales del mercado Forex usando NewsAPI.
-        """
+        """Obtiene noticias del mercado Forex usando NewsAPI."""
+        if not self.newsapi_key:
+            return []
+
         params = {
             "q": "forex OR dólar OR euro OR tasas de interés OR banco central",
             "sortBy": "publishedAt",
@@ -91,13 +106,17 @@ class NewsConnector:
         op = medicion if medicion is not None else OPERACION_NULA
         try:
             with op.peticion() as p:
-                response = requests.get(self.newsapi_url, params=params)
+                response = requests.get(
+                    self.newsapi_url,
+                    params=params,
+                    timeout=NEWS_REQUEST_TIMEOUT_SECONDS,
+                )
                 p.anotar_status(getattr(response, "status_code", None))
                 response.raise_for_status()
             data = response.json()
             return [article["title"] for article in data.get("articles", [])[:numero_noticias]]
         except Exception as e:
-            print(f"❌ Error al obtener noticias de forex (NewsAPI): {describir_error(e)}")
+            print(f"Error al obtener noticias de forex (NewsAPI): {describir_error(e)}")
             return []
 
     def obtener_noticias_combinadas(self, total=6, medidor=None):
@@ -105,9 +124,9 @@ class NewsConnector:
         Devuelve una mezcla de noticias cripto, acciones y forex.
 
         Se mide por PROVEEDOR: CryptoPanic y NewsAPI son servicios distintos y
-        fallan por separado -en el baseline CryptoPanic devolvio 403 mientras
-        NewsAPI respondia-, asi que agregarlos en una sola fila ocultaria justo
-        el dato que interesa.
+        fallan por separado. Si una credencial no existe, ese proveedor aporta
+        cero elementos y cero peticiones; desconocido nunca se convierte en un
+        dato inventado.
         """
         m = medidor if medidor is not None else MEDIDOR_NULO
         op_cripto = m.operacion("cryptopanic", "noticias")
@@ -117,7 +136,7 @@ class NewsConnector:
         try:
             noticias += self.obtener_noticias_recientes(
                 numero_noticias=total // 3, medicion=op_cripto)
-        except:
+        except Exception:
             pass
         op_cripto.elementos(len(noticias))
 
@@ -125,12 +144,12 @@ class NewsConnector:
         try:
             noticias += self.obtener_noticias_stocks(
                 numero_noticias=total // 3, medicion=op_newsapi)
-        except:
+        except Exception:
             pass
         try:
             noticias += self.obtener_noticias_forex(
                 numero_noticias=total - len(noticias), medicion=op_newsapi)
-        except:
+        except Exception:
             pass
         op_newsapi.elementos(len(noticias) - antes_newsapi)
         return noticias
