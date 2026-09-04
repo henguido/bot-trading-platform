@@ -14,6 +14,7 @@ on:
       - "scripts/analyze_scanner_challenger_05j.py"
       - "scripts/shadow_strategy_execution_05k.py"
       - "scripts/status_research_05.py"
+      - "scripts/verdict_research_05.py"
 
 permissions:
   contents: read
@@ -94,6 +95,9 @@ jobs:
       - name: Export compact research status
         run: python scripts/status_research_05.py | tee artifacts/research-05-status.txt
 
+      - name: Export statistical research verdict
+        run: python scripts/verdict_research_05.py | tee artifacts/research-05-verdict.json
+
       - name: Save cumulative shadow state
         if: success()
         uses: actions/cache/save@v4
@@ -115,5 +119,6 @@ jobs:
             artifacts/strategy-execution-shadow-05k-state.json
             artifacts/strategy-execution-shadow-05k-summary.json
             artifacts/research-05-status.txt
+            artifacts/research-05-verdict.json
           if-no-files-found: warn
           retention-days: 30
