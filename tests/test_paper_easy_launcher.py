@@ -47,15 +47,23 @@ def test_lanzador_fuerza_utf8_para_python_en_windows():
 
 def test_lanzador_no_migra_no_instala_dependencias_y_no_habilita_live():
     texto = LAUNCHER.read_text(encoding="utf-8")
-    prohibidos = (
-        "alembic upgrade",
-        "pip install",
-        "npm install",
-        "ALLOW_LIVE_TRADING=yes-i-understand-the-risk",
-        "TRADING_MODE=LIVE",
+    lineas_ejecutables = [
+        linea.strip()
+        for linea in texto.splitlines()
+        if linea.strip() and not linea.lstrip().startswith("#")
+    ]
+    texto_ejecutable = "\n".join(lineas_ejecutables)
+
+    assert "alembic upgrade" not in texto_ejecutable
+    assert "ALLOW_LIVE_TRADING=yes-i-understand-the-risk" not in texto_ejecutable
+    assert "TRADING_MODE=LIVE" not in texto_ejecutable
+
+    # Los mensajes informativos pueden mencionar comandos manuales. Lo que se
+    # protege es que el launcher no invoque instaladores por si mismo.
+    assert not any(
+        linea.startswith(("pip ", "pip.exe ", "python -m pip ", "npm ", "npm.cmd "))
+        for linea in lineas_ejecutables
     )
-    for prohibido in prohibidos:
-        assert prohibido not in texto
 
 
 def test_lanzador_usa_un_worker_y_pids_propios_para_apagado():
