@@ -33,7 +33,7 @@ if str(RAIZ_REPO) not in sys.path:
 
 from backend.app.services.ordenes import Lado
 from backend.config import settings
-from backend.connectors.crypto.binance_connector import BinanceConnector
+from backend.connectors.crypto.binance_public_market import BinancePublicMarketData
 from backend.economia.ejecucion_paper import calcular_fill_compra, calcular_fill_venta
 from backend.risk import elegibilidad, reloj
 from backend.risk.estado import EstadoRiesgo, Posicion
@@ -527,7 +527,7 @@ def main() -> None:
     now = datetime.now(timezone.utc)
     estado_05i = cargar_05i()
     state = cargar_estado()
-    binance = BinanceConnector()
+    binance = BinancePublicMarketData()
     abiertas, cerradas, summary = procesar(estado_05i, state, binance, now)
     _guardar(STATE, state)
     _guardar(SUMMARY, summary)
