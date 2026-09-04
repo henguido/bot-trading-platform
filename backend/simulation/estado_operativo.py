@@ -49,7 +49,7 @@ def construir_estado_operativo(*, estado, valoracion_completa: bool,
     mensajes = []
     if not gate_activo:
         mensajes.append(
-            "Gate 05E desactivado: la evidencia OOS aun no ha promovido el filtro de rentabilidad."
+            "Gate 05E apagado por seguridad: la evidencia OOS aun es insuficiente para promoverlo."
         )
     if not valoracion_completa:
         mensajes.append(
@@ -68,9 +68,10 @@ def construir_estado_operativo(*, estado, valoracion_completa: bool,
         "decision_engine_description": descripcion_motor,
         "profitability_gate_05e_enabled": gate_activo,
         "profitability_gate_05e_status": (
-            "ACTIVO_PAPER" if gate_activo else "PENDIENTE_EVIDENCIA_OOS"
+            "ACTIVO_PAPER" if gate_activo else "APAGADO_EVIDENCIA_OOS_INSUFICIENTE"
         ),
-        "paper_execution_model": "ORDER_BOOK_VWAP_TAKER_FEE",
+        "paper_execution_model": "ORDER_BOOK_VWAP_SLIPPAGE_FEE_VERIFICABLE",
+        "paper_fee_policy": "TAKER_FEE_SOLO_CON_FUENTE_VERIFICABLE; DESCONOCIDO_NO_ES_CERO",
         "paper_ledger_source": "PAPER_OPERACIONES",
         "valoracion_completa": bool(valoracion_completa),
         "capital_inicial_usd": inicial,
