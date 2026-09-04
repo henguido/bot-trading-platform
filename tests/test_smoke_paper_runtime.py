@@ -1,3 +1,4 @@
+from backend.esquema import ALINEADO
 from scripts.smoke_paper_runtime import consultar_health, evaluar_health, main
 
 
@@ -9,7 +10,7 @@ def _health(**overrides):
         "es_lider": True,
         "motivo_inactivo": None,
         "esquema": {
-            "estado": "ALINEADO",
+            "estado": ALINEADO,
             "revision_actual": "0007_decision_cycle_audit",
             "revision_esperada": "0007_decision_cycle_audit",
             "detalle": None,
@@ -28,6 +29,13 @@ def test_smoke_runtime_ready_solo_con_paper_alineado_activo_y_lider():
     assert {c["codigo"] for c in resultado["checks"]} == {
         "MODO_PAPER", "ALEMBIC", "BUCLE", "LIDERAZGO"
     }
+
+
+def test_smoke_runtime_usa_estado_canonico_del_modulo_esquema():
+    assert ALINEADO == "OK"
+    resultado = evaluar_health(_health())
+    alembic = next(c for c in resultado["checks"] if c["codigo"] == "ALEMBIC")
+    assert alembic["nivel"] == "OK"
 
 
 def test_smoke_runtime_bloquea_live_aunque_el_resto_este_sano():
