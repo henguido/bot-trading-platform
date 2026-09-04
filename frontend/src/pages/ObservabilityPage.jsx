@@ -50,6 +50,16 @@ function FunnelStage({ label, value, max, detail }) {
   );
 }
 
+function SmallMetric({ label, value, detail }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-3">
+      <p className="text-[11px] uppercase tracking-wider text-slate-600">{label}</p>
+      <p className="mt-1 font-mono text-lg font-semibold text-slate-200">{Number(value || 0)}</p>
+      <p className="mt-1 text-[11px] leading-4 text-slate-600">{detail}</p>
+    </div>
+  );
+}
+
 function ObservabilityPage() {
   const navigate = useNavigate();
   const [health, setHealth] = useState(null);
@@ -115,8 +125,11 @@ function ObservabilityPage() {
       .slice(0, 8);
   }, [latest]);
 
-  const healthOk = Boolean(health?.bucle_activo && health?.es_lider && health?.esquema?.estado === "ALINEADO");
-  const schemaOk = health?.esquema?.estado === "ALINEADO";
+  // backend.esquema usa "OK" como estado canonico. Se tolera ALINEADO solo
+  // para leer snapshots antiguos, pero la UI ya no marca como malo un /health real.
+  const schemaState = health?.esquema?.estado;
+  const schemaOk = schemaState === "OK" || schemaState === "ALINEADO";
+  const healthOk = Boolean(health?.bucle_activo && health?.es_lider && schemaOk);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -178,7 +191,7 @@ function ObservabilityPage() {
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                 <p className="text-xs uppercase tracking-wider text-slate-500">Esquema</p>
-                <div className="mt-3"><Pill status={schemaOk ? "ok" : "bad"}>{health?.esquema?.estado || "Desconocido"}</Pill></div>
+                <div className="mt-3"><Pill status={schemaOk ? "ok" : "bad"}>{schemaState || "Desconocido"}</Pill></div>
                 <p className="mt-3 text-xs text-slate-500">{health?.esquema?.revision_actual || "—"} → {health?.esquema?.revision_esperada || "—"}</p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
@@ -199,14 +212,22 @@ function ObservabilityPage() {
                 </div>
 
                 {latest ? (
-                  <div className="mt-5 space-y-4">
-                    <FunnelStage label="Universo" value={universe} max={funnelMax} detail="Activos evaluables al inicio" />
-                    <FunnelStage label="Elegibilidad" value={afterEligibility} max={funnelMax} detail="Compras ejecutables + posiciones preservadas" />
-                    <FunnelStage label="Scanner" value={afterScanner} max={funnelMax} detail="Top-N + posiciones abiertas" />
-                    <FunnelStage label="Motor de decisión" value={engineResults} max={funnelMax} detail={latest.decision_engine || "—"} />
-                    <FunnelStage label="Riesgo aprobado" value={riskApproved} max={funnelMax} detail="MotorRiesgo" />
-                    <FunnelStage label="Ejecuciones" value={executions} max={funnelMax} detail="Fills registrados" />
-                  </div>
+                  <>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <SmallMetric label="Descartados elegibilidad" value={counts.descartados_elegibilidad} detail="No llegaron al scanner" />
+                      <SmallMetric label="Descartados scanner" value={counts.scanner_descartados} detail="Fuera del Top-N ejecutable" />
+                      <SmallMetric label="Bloqueos rentabilidad" value={Number(counts.rentabilidad_pre_bloqueados || 0) + Number(counts.rentabilidad_post_bloqueados || 0)} detail="05E solo si el gate fue aplicado" />
+                      <SmallMetric label="Rechazos de riesgo" value={counts.riesgo_rechazadas} detail="MotorRiesgo mantuvo autoridad" />
+                    </div>
+                    <div className="mt-5 space-y-4">
+                      <FunnelStage label="Universo" value={universe} max={funnelMax} detail="Activos evaluables al inicio" />
+                      <FunnelStage label="Elegibilidad" value={afterEligibility} max={funnelMax} detail="Compras ejecutables + posiciones preservadas" />
+                      <FunnelStage label="Scanner" value={afterScanner} max={funnelMax} detail="Top-N + posiciones abiertas" />
+                      <FunnelStage label="Motor de decisión" value={engineResults} max={funnelMax} detail={latest.decision_engine || "—"} />
+                      <FunnelStage label="Riesgo aprobado" value={riskApproved} max={funnelMax} detail="MotorRiesgo" />
+                      <FunnelStage label="Ejecuciones" value={executions} max={funnelMax} detail="Fills registrados" />
+                    </div>
+                  </>
                 ) : (
                   <div className="py-12 text-center text-sm text-slate-500">El primer ciclo aparecerá después de migrar 0007 y ejecutar el bot.</div>
                 )}
