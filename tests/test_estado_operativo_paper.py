@@ -45,10 +45,17 @@ def test_estado_operativo_deriva_capital_motor_y_evidencia_sin_red():
     assert salida["paper_ledger_source"] == "PAPER_OPERACIONES"
 
     limites = salida["limites_riesgo"]
-    assert limites["asignacion_maxima_por_operacion_pct"] == (
-        settings.LIMITE_ASIGNACION_POR_OPERACION * 100.0
+    asignacion = settings.LIMITE_ASIGNACION_POR_OPERACION
+    esperado_efectivo = min(
+        settings.MONTO_MAXIMO_USDT,
+        estado.capital_usd * asignacion,
+        estado.capital_usd,
+        settings.MAX_EXPOSICION_TOTAL_USDT - estado.exposicion_coste_usd,
     )
-    assert limites["monto_maximo_por_operacion_usd"] == settings.MONTO_MAXIMO_USDT
+    assert limites["asignacion_maxima_por_operacion_pct"] == asignacion * 100.0
+    assert limites["monto_maximo_por_operacion_usd"] == esperado_efectivo
+    assert limites["monto_maximo_configurado_por_operacion_usd"] == settings.MONTO_MAXIMO_USDT
+    assert limites["monto_maximo_por_operacion_es_cota_pre_activo"] is True
     assert limites["perdida_realizada_diaria_maxima_usd"] == settings.MAX_DAILY_LOSS_USDT
     assert limites["exposicion_total_maxima_usd"] == settings.MAX_EXPOSICION_TOTAL_USDT
     assert limites["exposicion_por_activo_maxima_usd"] == settings.MAX_EXPOSICION_POR_ACTIVO_USDT
@@ -77,3 +84,22 @@ def test_estado_operativo_declara_incertidumbre_y_no_inventa_evidencia():
     assert "DESCONOCIDO_NO_ES_CERO" in salida["paper_fee_policy"]
     assert any("05E apagado por seguridad" in mensaje for mensaje in salida["mensajes"])
     assert len(salida["mensajes"]) >= 2
+
+
+def test_tope_operacion_disminuye_con_capital_disponible_y_no_supera_hard_cap():
+    estado = EstadoPaper(
+        initial_capital_usd=500.0,
+        capital_usd=456.95,
+        posiciones={},
+        realized_pnl_usd=0.0,
+    )
+
+    salida = construir_estado_operativo(
+        estado=estado,
+        valoracion_completa=True,
+        estrategias_paper={"estrategias": {}},
+    )
+
+    limites = salida["limites_riesgo"]
+    assert limites["monto_maximo_por_operacion_usd"] == 456.95 * settings.LIMITE_ASIGNACION_POR_OPERACION
+    assert limites["monto_maximo_por_operacion_usd"] < limites["monto_maximo_configurado_por_operacion_usd"]
