@@ -60,6 +60,23 @@ def construir_estado_operativo(*, estado, valoracion_completa: bool,
             "Aun no hay cierres PAPER atribuidos por estrategia; no existe P&L realizado comparable."
         )
 
+    asignacion = float(settings.LIMITE_ASIGNACION_POR_OPERACION)
+    tope_duro = float(settings.MONTO_MAXIMO_USDT)
+    max_exposicion_total = float(settings.MAX_EXPOSICION_TOTAL_USDT)
+    margen_exposicion_total = max(0.0, max_exposicion_total - desplegado)
+    # Cota efectiva GENERAL antes del limite especifico por activo y de los
+    # filtros del exchange. Replica solo los limites independientes del symbol
+    # que MotorRiesgo combina con min(); no participa en decisiones.
+    tope_efectivo_general = max(
+        0.0,
+        min(
+            tope_duro,
+            capital * asignacion,
+            capital,
+            margen_exposicion_total,
+        ),
+    )
+
     return {
         "modo": "PAPER",
         "live_orders_enabled": False,
@@ -80,12 +97,14 @@ def construir_estado_operativo(*, estado, valoracion_completa: bool,
         "capital_desplegado_pct": _porcentaje(desplegado, inicial),
         "retorno_realizado_pct": _porcentaje(realizado, inicial),
         "limites_riesgo": {
-            "asignacion_maxima_por_operacion_pct": (
-                float(settings.LIMITE_ASIGNACION_POR_OPERACION) * 100.0
-            ),
-            "monto_maximo_por_operacion_usd": float(settings.MONTO_MAXIMO_USDT),
+            "asignacion_maxima_por_operacion_pct": asignacion * 100.0,
+            # La UI historica llama a este campo "Tope / operacion". Debe
+            # mostrar la cota efectiva actual, no el hard cap aislado de $20.
+            "monto_maximo_por_operacion_usd": tope_efectivo_general,
+            "monto_maximo_configurado_por_operacion_usd": tope_duro,
+            "monto_maximo_por_operacion_es_cota_pre_activo": True,
             "perdida_realizada_diaria_maxima_usd": float(settings.MAX_DAILY_LOSS_USDT),
-            "exposicion_total_maxima_usd": float(settings.MAX_EXPOSICION_TOTAL_USDT),
+            "exposicion_total_maxima_usd": max_exposicion_total,
             "exposicion_por_activo_maxima_usd": float(settings.MAX_EXPOSICION_POR_ACTIVO_USDT),
             "timezone_dia_riesgo": str(settings.RISK_TIMEZONE),
         },
