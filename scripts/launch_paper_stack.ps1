@@ -107,13 +107,13 @@ if (Port-In-Use $FrontendPort) {
     Fail "El puerto frontend $FrontendPort ya esta ocupado. No se cerrara ningun proceso ajeno automaticamente."
 }
 
-Write-Host "[BOT PAPER] 1/4 Verificando readiness PAPER v1..." -ForegroundColor Cyan
+Write-Host "[BOT PAPER] 1/5 Verificando readiness PAPER v1..." -ForegroundColor Cyan
 & $Python "scripts\check_paper_release.py"
 if ($LASTEXITCODE -ne 0) {
     Fail "El readiness encontro BLOCKER. No se inicio backend ni frontend."
 }
 
-Write-Host "[BOT PAPER] 2/4 Iniciando backend..." -ForegroundColor Cyan
+Write-Host "[BOT PAPER] 2/5 Iniciando backend..." -ForegroundColor Cyan
 $backendArgs = @(
     "-m", "uvicorn", "backend.main:app",
     "--host", $HostAddress,
@@ -151,7 +151,7 @@ try {
         throw "El backend no respondio /health dentro de 30 segundos."
     }
 
-    Write-Host "[BOT PAPER] 3/4 Ejecutando smoke runtime de solo lectura..." -ForegroundColor Cyan
+    Write-Host "[BOT PAPER] 3/5 Ejecutando smoke runtime de solo lectura..." -ForegroundColor Cyan
     # Ejecutarlo como modulo conserva la raiz del repositorio en sys.path y
     # evita ModuleNotFoundError al importar backend.* desde Windows.
     & $Python "-m" "scripts.smoke_paper_runtime" "--base-url" $BackendUrl
@@ -159,7 +159,7 @@ try {
         throw "El smoke runtime PAPER no quedo READY."
     }
 
-    Write-Host "[BOT PAPER] 4/4 Iniciando frontend..." -ForegroundColor Cyan
+    Write-Host "[BOT PAPER] 4/5 Iniciando frontend..." -ForegroundColor Cyan
     # La UI local debe hablar SIEMPRE con el backend que acaba de validar este
     # mismo lanzador. Una frontend/.env antigua o un VITE_API_URL heredado no
     # puede redirigir login/signup a otra instancia.
@@ -176,9 +176,28 @@ try {
     $frontendProcess = Start-Process @frontendStart
     Set-Content -Path $FrontendPidFile -Value $frontendProcess.Id -Encoding ascii
 
-    Start-Sleep -Seconds 2
-    if ($frontendProcess.HasExited) {
-        throw "El frontend termino durante el arranque. Revisa $FrontendErr"
+    $frontendReady = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        if ($frontendProcess.HasExited) {
+            throw "El frontend termino durante el arranque. Revisa $FrontendErr"
+        }
+        try {
+            $null = Invoke-WebRequest -Method Get -Uri $FrontendUrl -TimeoutSec 2 -UseBasicParsing
+            $frontendReady = $true
+            break
+        }
+        catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+    if (-not $frontendReady) {
+        throw "El frontend no respondio HTTP dentro de 30 segundos."
+    }
+
+    Write-Host "[BOT PAPER] 5/5 Validando frontend HTTP..." -ForegroundColor Cyan
+    & $Python "-m" "scripts.smoke_frontend_runtime" "--base-url" $FrontendUrl
+    if ($LASTEXITCODE -ne 0) {
+        throw "El smoke HTTP del frontend PAPER no quedo READY."
     }
 }
 catch {
