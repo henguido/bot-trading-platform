@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+MIN_BUCKETS = 30
 FILES = {
     "05I": ROOT / "artifacts" / "scanner-unified-shadow-05i-summary.json",
     "05J": ROOT / "artifacts" / "scanner-challenger-05j.json",
@@ -39,6 +40,14 @@ def _mean(obj):
     return obj.get("mean") if isinstance(obj, dict) else None
 
 
+def _progress(completed):
+    try:
+        value = max(0, int(completed))
+    except (TypeError, ValueError):
+        return None
+    return min(100.0, (value / MIN_BUCKETS) * 100.0)
+
+
 def _execution_filters_checked(data_k):
     legacy = data_k.get("exchange_filters_checked")
     if legacy is not None:
@@ -53,8 +62,10 @@ def construir_estado(data_i, data_j, data_k):
     salida = {"05I": None, "05J": None, "05K": None}
 
     if isinstance(data_i, dict) and not data_i.get("_invalid"):
+        complete_i = data_i.get("complete_buckets")
         salida["05I"] = {
-            "complete_buckets": data_i.get("complete_buckets"),
+            "complete_buckets": complete_i,
+            "progress_to_30_pct": _progress(complete_i),
             "matured_observations": data_i.get("matured_observations"),
             "alpha_mean_bps": _mean(data_i.get("bucket_alpha_top_minus_control_bps")),
             "alpha_median_bps": (
@@ -70,8 +81,10 @@ def construir_estado(data_i, data_j, data_k):
         }
 
     if isinstance(data_j, dict) and not data_j.get("_invalid"):
+        complete_j = data_j.get("complete_oos_buckets")
         salida["05J"] = {
-            "complete_oos_buckets": data_j.get("complete_oos_buckets"),
+            "complete_oos_buckets": complete_j,
+            "progress_to_30_pct": _progress(complete_j),
             "oos_total": data_j.get("oos_total_observations"),
             "oos_settled_ok": data_j.get("oos_settled_ok_observations"),
             "oos_pending": data_j.get("oos_pending_observations"),
@@ -90,13 +103,21 @@ def construir_estado(data_i, data_j, data_k):
         portfolios = data_k.get("portfolios") or {}
         base = portfolios.get("BASE_05I") or {}
         challenger = portfolios.get("CHALLENGER_05J") or {}
+        complete_k = data_k.get("paired_complete_buckets")
         salida["05K"] = {
             "processed_buckets": data_k.get("processed_buckets"),
-            "paired_complete_buckets": data_k.get("paired_complete_buckets"),
+            "paired_complete_buckets": complete_k,
+            "progress_to_30_pct": _progress(complete_k),
+            "base_open_positions": base.get("open_positions"),
             "base_closed_trades": base.get("closed_trades"),
+            "base_fees_executed_usd": base.get("fees_executed_usd"),
             "base_realized_pnl_usd": base.get("realized_pnl_usd"),
+            "base_realized_net_mean_bps": _mean(base.get("realized_net_bps")),
+            "challenger_open_positions": challenger.get("open_positions"),
             "challenger_closed_trades": challenger.get("closed_trades"),
+            "challenger_fees_executed_usd": challenger.get("fees_executed_usd"),
             "challenger_realized_pnl_usd": challenger.get("realized_pnl_usd"),
+            "challenger_realized_net_mean_bps": _mean(challenger.get("realized_net_bps")),
             "challenger_minus_base_net_mean_bps": _mean(
                 data_k.get("challenger_minus_base_net_bps")
             ),
@@ -117,6 +138,8 @@ def _print_section(title, rows):
             suffix = " bps"
         elif key.endswith("_usd"):
             suffix = " USDT"
+        elif key.endswith("_pct"):
+            suffix = "%"
         print(f"  {key}: {_fmt(value) if isinstance(value, float) else value}{suffix}")
 
 
