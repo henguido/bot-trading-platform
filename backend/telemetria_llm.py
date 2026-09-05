@@ -23,11 +23,16 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 DISPONIBLE = "DISPONIBLE"
 NO_DISPONIBLE = "NO_DISPONIBLE"
+
+
+def _utc_naive() -> datetime:
+    """UTC sin zona para conservar el contrato actual de persistencia."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def nuevo_call_id() -> str:
@@ -66,7 +71,7 @@ class MetricasLlamadaLLM:
     modelo_respuesta: Optional[str] = None
 
     call_id: str = field(default_factory=nuevo_call_id)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=_utc_naive)
 
     http_status: Optional[int] = None
     exito: bool = False
