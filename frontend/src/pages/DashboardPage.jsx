@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import EconomicReadinessCard from "../components/EconomicReadinessCard";
 import BalanceChart from "./BalanceChart";
-import { getResumen } from "../services/api";
+import { getPaperReadiness, getResumen } from "../services/api";
 
 const toneForNumber = (value) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "text-slate-300";
@@ -42,6 +43,9 @@ function DashboardPage() {
   const [operativo, setOperativo] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [cargando, setCargando] = useState(true);
+  const [readiness, setReadiness] = useState(null);
+  const [readinessError, setReadinessError] = useState("");
+  const [readinessLoading, setReadinessLoading] = useState(true);
   const [meta, setMeta] = useState({
     modo: "",
     pnlRealizado: null,
@@ -116,6 +120,37 @@ function DashboardPage() {
         setErrorMsg(err.message || "No se pudo cargar el resumen");
       })
       .finally(() => setCargando(false));
+  }, [navigate]);
+
+  useEffect(() => {
+    let activo = true;
+    setReadinessLoading(true);
+
+    getPaperReadiness()
+      .then((data) => {
+        if (!activo) return;
+        if (!data || typeof data !== "object" || !data.fee) {
+          throw new Error("Respuesta de readiness inválida");
+        }
+        setReadiness(data);
+        setReadinessError("");
+      })
+      .catch((err) => {
+        if (!activo) return;
+        if (err.status === 401) {
+          navigate("/login");
+          return;
+        }
+        setReadiness(null);
+        setReadinessError(err.message || "No se pudo verificar el readiness económico");
+      })
+      .finally(() => {
+        if (activo) setReadinessLoading(false);
+      });
+
+    return () => {
+      activo = false;
+    };
   }, [navigate]);
 
   const handleLogout = () => {
@@ -246,7 +281,7 @@ function DashboardPage() {
               />
             </section>
 
-            <section className="mt-4 grid gap-4 lg:grid-cols-4">
+            <section className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 lg:col-span-2">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -283,6 +318,12 @@ function DashboardPage() {
                   Slippage se modela con datos disponibles; fee taker solo con fuente verificable. Desconocido ≠ 0. LIVE deshabilitado.
                 </p>
               </div>
+
+              <EconomicReadinessCard
+                readiness={readiness}
+                loading={readinessLoading}
+                error={readinessError}
+              />
             </section>
 
             {operativo?.mensajes?.length > 0 && (

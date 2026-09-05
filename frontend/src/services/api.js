@@ -121,6 +121,10 @@ export function getHealth() {
   return apiFetch("/health", {}, { auth: false });
 }
 
+export function getPaperReadiness() {
+  return apiFetch("/api/readiness");
+}
+
 export async function downloadPaperJournal(formato = "csv") {
   const seguro = formato === "json" ? "json" : "csv";
   const headers = new Headers();

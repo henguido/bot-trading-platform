@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import DataFreshnessAlert from "../components/DataFreshnessAlert";
 import { getDecisionCycles, getHealth } from "../services/api";
 
 const PRIMARY_REASON_LABELS = {
@@ -84,7 +85,7 @@ function ObservabilityPage() {
   const [cycles, setCycles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
 
   const load = useCallback(async ({ initial = false } = {}) => {
@@ -98,13 +99,13 @@ function ObservabilityPage() {
       setHealth(healthData || null);
       setCycles(Array.isArray(cyclesData) ? cyclesData : []);
       setUpdatedAt(new Date());
-      setError("");
+      setError(null);
     } catch (err) {
       if (err.status === 401) {
         navigate("/login");
         return;
       }
-      setError(err.message || "No se pudo cargar observabilidad");
+      setError(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -167,6 +168,8 @@ function ObservabilityPage() {
   const schemaState = health?.esquema?.estado;
   const schemaOk = schemaState === "OK" || schemaState === "ALINEADO";
   const healthOk = Boolean(health?.bucle_activo && health?.es_lider && schemaOk);
+  const hasSnapshot = Boolean(updatedAt);
+  const dataStale = Boolean(error && hasSnapshot);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -202,15 +205,27 @@ function ObservabilityPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {error && (
-          <div className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>
-        )}
+        <DataFreshnessAlert
+          error={error}
+          lastUpdated={updatedAt}
+          onRetry={() => load()}
+          retrying={refreshing}
+        />
 
         {loading ? (
           <div className="grid min-h-[360px] place-items-center rounded-2xl border border-slate-800 bg-slate-900/50">
             <div className="text-center">
               <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-700 border-t-cyan-400" />
               <p className="mt-3 text-sm text-slate-500">Cargando estado operativo…</p>
+            </div>
+          </div>
+        ) : !hasSnapshot ? (
+          <div className="grid min-h-[300px] place-items-center rounded-2xl border border-rose-500/20 bg-slate-900/50 px-5 py-10 text-center">
+            <div className="max-w-lg">
+              <p className="text-lg font-semibold text-white">Sin datos operativos confirmados</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                La consola no mostrará ceros ni estados desconocidos como si fueran una lectura válida. Reintenta cuando el backend PAPER esté disponible.
+              </p>
             </div>
           </div>
         ) : (
@@ -233,8 +248,13 @@ function ObservabilityPage() {
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
                 <p className="text-xs uppercase tracking-wider text-slate-500">Última lectura</p>
+                <div className="mt-3">
+                  <Pill status={dataStale ? "warn" : "ok"}>{dataStale ? "Datos desactualizados" : "Datos al día"}</Pill>
+                </div>
                 <p className="mt-2 text-sm font-semibold text-slate-200">{updatedAt ? updatedAt.toLocaleTimeString() : "—"}</p>
-                <p className="mt-1 text-xs text-slate-500">Auto-refresh 30 s con pestaña visible</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {dataStale ? "Último refresh fallido · snapshot conservado" : "Auto-refresh 30 s con pestaña visible"}
+                </p>
               </div>
             </section>
 
