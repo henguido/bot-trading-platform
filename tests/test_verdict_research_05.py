@@ -6,8 +6,11 @@ def _costes_ejecutables():
         "orderbook_calls": 100,
         "exchange_info_calls": 10,
         "portfolios": {
-            "BASE_05I": {"fees_executed_usd": 0.25},
-            "CHALLENGER_05J": {"fees_executed_usd": 0.25},
+            "BASE_05I": {"fees_executed_usd": 0.25, "open_positions": 1},
+            "CHALLENGER_05J": {
+                "fees_executed_usd": 0.25,
+                "open_positions": 1,
+            },
         },
     }
 
