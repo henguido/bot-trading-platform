@@ -224,6 +224,29 @@ def test_independent_price_keeps_hardstop_available_without_book():
     assert Monitor().evaluate(position(), f)["reason"] == "HARD_STOP"
 
 
+def test_hardstop_uses_full_liquidation_vwap_instead_of_mid():
+    p = Position("BTCUSDT")
+    p.add(lot(stop=97))
+    e = event(price=97.5)
+    e["book"] = {"bids": [["96.9", ".09"]], "asks": [["98.1", ".09"]]}
+    f = build_features(e, p.quantity, [2] * 20)
+    assert f.price == 97.5 and f.price > 97
+    assert f.liquidation_vwap == 96.9
+    decision = Monitor().evaluate(p, f)
+    assert decision["state"] == "EMERGENCY"
+    assert decision["reason"] == "HARD_STOP"
+
+
+def test_insufficient_real_book_depth_is_immediate_emergency():
+    p = position()
+    e = event()
+    e["book"]["bids"][0][1] = ".001"
+    f = build_features(e, p.quantity, [2] * 20)
+    assert f.price_fresh and "INSUFFICIENT_DEPTH" in f.reasons
+    assert f.liquidation_vwap is None
+    assert Monitor().evaluate(p, f)["reason"] == "HARD_STOP"
+
+
 def test_gate_consumes_actual_motor_authorization():
     from backend.risk.motor import MotorRiesgo, PropuestaOperacion
     from backend.app.services.ordenes import Lado

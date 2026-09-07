@@ -6,6 +6,7 @@ process: imports of existing research adapters happen after environment guards.
 from __future__ import annotations
 
 import argparse
+import ast
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -21,26 +22,65 @@ if str(ROOT) not in sys.path:
 from backend.erm.readiness import validate_fee
 from scripts.shadow_emergency_risk_05m import guard_environment, write_report, main as capture_main
 
-FROZEN_FILES = ("backend/scanner.py", "backend/risk/motor.py",
+FROZEN_ROOTS = ("backend/scanner.py", "backend/risk/motor.py",
                 "scripts/shadow_scanner_unified_05i.py",
                 "scripts/analyze_scanner_challenger_05j.py",
-                "scripts/shadow_strategy_execution_05k.py")
+                "scripts/shadow_strategy_execution_05k.py",
+                "scripts/shadow_emergency_risk_05m.py",
+                "scripts/run_erm_05m_prospective.py")
+FROZEN_ENVIRONMENT = ("requirements.txt", "constraints.txt")
+
+
+def _local_module_paths(module):
+    if not module or module.split(".")[0] not in {"backend", "scripts"}:
+        return set()
+    base = ROOT.joinpath(*module.split("."))
+    candidates = (base.with_suffix(".py"), base / "__init__.py")
+    return {candidate for candidate in candidates if candidate.is_file()}
+
+
+def _dependency_closure():
+    """Return every local Python source reachable from the experimental roots."""
+    pending = [ROOT / name for name in FROZEN_ROOTS]
+    found = set()
+    while pending:
+        path = pending.pop()
+        if path in found:
+            continue
+        if not path.is_file() or not path.is_relative_to(ROOT):
+            raise ValueError(f"invalid frozen dependency: {path}")
+        found.add(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.Import):
+                modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                if node.module:
+                    modules.append(node.module)
+                    modules.extend(f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*")
+            for module in modules:
+                pending.extend(_local_module_paths(module) - found)
+    return found
 
 
 def fingerprint():
-    return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in FROZEN_FILES}
+    paths = _dependency_closure()
+    paths.update(ROOT / name for name in FROZEN_ENVIRONMENT if (ROOT / name).is_file())
+    return {path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(paths)}
 
 
 def prepare_cohort(output, fee, *, observer, executor, clock=time.time):
     """Inject the unchanged 05I and 05K functions, operating on fresh dictionaries."""
     validate_fee(fee, clock())
     output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
+    if output.exists():
+        raise FileExistsError(output)
     hashes = fingerprint()
     source_i = {"phase": "05I", "mode": "SHADOW", "observations": []}
     observed = datetime.fromtimestamp(clock(), timezone.utc)
     added = observer(source_i, observed)
-    write_report(output / "scanner-independent-05i.json", source_i)
     if added != 20:
         raise ValueError("INDEPENDENT_COHORT_REQUIRES_COMPLETE_TOP20")
     source_k, summary = executor(source_i, datetime.fromtimestamp(clock(), timezone.utc))
@@ -50,13 +90,15 @@ def prepare_cohort(output, fee, *, observer, executor, clock=time.time):
                 "created_at": observed.isoformat(), "frozen_files_sha256": hashes,
                 "fee_evidence": fee, "orders_executed": False, "scanner_modified": False,
                 "database_touched": False, "LIVE": False, "enabled_05E": False}
-    write_report(output / "source-independent-05k.json", source_k)
-    write_report(output / "summary-independent-05k.json", summary)
-    write_report(output / "manifest-05m.json", manifest)
     if fingerprint() != hashes:
         raise RuntimeError("frozen code changed during preparation")
     if len(source_k["portfolios"]["BASE_05I"]["open_positions"]) != 5:
         raise ValueError("INDEPENDENT_COHORT_REQUIRES_FIVE_EXECUTABLE_BASE_LOTS")
+    output.mkdir(parents=True, exist_ok=False)
+    write_report(output / "scanner-independent-05i.json", source_i)
+    write_report(output / "source-independent-05k.json", source_k)
+    write_report(output / "summary-independent-05k.json", summary)
+    write_report(output / "manifest-05m.json", manifest)
     return output / "source-independent-05k.json"
 
 

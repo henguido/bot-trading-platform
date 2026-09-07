@@ -1,4 +1,5 @@
 import copy
+from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
@@ -78,7 +79,8 @@ def test_exit_missing_evidence_never_creates_fill(fault):
     result = replay(source(), es)
     assert result["paired_closed_lots"] == 0
     assert result["comparison"]["delta"] is None
-    assert result["arms"]["BASE_ERM"]["open_lots"] == 1
+    assert result["arms"]["BASE_ERM"]["open_lots"] == 0
+    assert result["diagnostic_arms_all_observed"]["BASE_ERM"]["open_lots"] == 1
 
 
 def test_late_capture_and_gap_excluded_from_qualified_comparison():
@@ -88,6 +90,34 @@ def test_late_capture_and_gap_excluded_from_qualified_comparison():
     assert result["qualified_pairs"] == 0
     assert result["comparison"]["delta"] is None
     assert result["status"] == "INSUFFICIENT_EVIDENCE"
+    assert result["arms_scope"] == "QUALIFIED_PAIRS_ONLY"
+    assert result["arms"]["BASE"]["net_pnl"] is None
+    assert result["diagnostic_arms_all_observed"]["BASE"]["net_pnl"] is not None
+
+
+def test_base_exit_beyond_grace_is_closed_but_never_qualified():
+    es = [event(at) for at in range(3000, 4171, 30)]
+    es.append(event(7800, 150))
+    result = replay(source(), es, erm_enabled=False)
+    lot_id = result["pairs"][0]["lot"]
+    coverage = result["coverage"][lot_id]
+    assert result["paired_closed_lots"] == 1
+    assert result["qualified_pairs"] == 0
+    assert coverage["base_exit_at"] == 7800
+    assert coverage["base_exit_delay_seconds"] == 3600
+    assert coverage["base_exit_within_grace"] is False
+    assert coverage["complete"] is False
+    assert any(row["reason"] == "EXIT_DELAYED" and row["lot"] == lot_id for row in result["audit"])
+
+
+def test_invalid_book_at_horizon_records_no_fill_without_aborting():
+    es = events()
+    for e in es:
+        if e["at"] >= 4200:
+            e["book"]["bids"][0][0] = "NaN"
+    result = replay(source(), es, erm_enabled=False)
+    assert result["paired_closed_lots"] == 0
+    assert any(row["reason"] == "EXIT_NOT_EXECUTABLE" for row in result["audit"])
 
 
 def test_out_of_order_rejected_duplicate_snapshot_not_confirmation():
@@ -178,6 +208,9 @@ def test_multiple_lots_cannot_reuse_top_of_book_depth():
     report = replay(src, es, erm_enabled=False)
     lots = report["lots"]["BASE"]
     assert lots[0]["realized"] > lots[1]["realized"]
+    assert lots[0]["exit_slippage_usd"] == 0
+    assert lots[1]["exit_slippage_usd"] == Decimal(".1791")
+    assert report["arms"]["BASE"]["slippage_usdt"] == pytest.approx(.1791)
     assert report["arms"]["BASE"] == report["arms"]["BASE_ERM"]
 
 

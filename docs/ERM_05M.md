@@ -71,6 +71,10 @@ El adaptador BASE asigna un stop experimental inicial del 3% bajo el fill;
 otros experimentos de lotes, sin modificar el adaptador BASE congelado.
 Hard-stop por lote, presupuesto neto de pérdida o límite portfolio activa
 EMERGENCY inmediatamente con precio fresco, aunque falten indicadores.
+Cuando existe libro válido y profundidad completa, stops y presupuesto de pérdida
+se evalúan contra el VWAP ejecutable de liquidar toda la posición en bids, con
+fee de salida, no contra el precio medio. Un libro válido sin profundidad para
+liquidar la pequeña posición PAPER también activa EMERGENCY inmediatamente.
 Precio stale no permite asumir ejecución. EMERGENCY persiste hasta cierre;
 salida de WATCH/PROTECT requiere 4 lecturas sanas z<1 y sin deterioro/protección;
 COOLDOWN mínimo 300 s más 4 lecturas sanas para NORMAL. Riesgo renovado interrumpe
@@ -82,6 +86,9 @@ Mismo evento temporal, libro, fees y filtros para ambos brazos; una salida ERM
 decidida en t se llena como pronto en el siguiente snapshot válido (sin lookahead).
 Sin profundidad suficiente/filtros/fee vigente no hay fill. BASE también usa
 el primer snapshot válido en/después de due_at, señalando retraso de liquidación.
+La tolerancia predeclarada es 60 segundos: una liquidación BASE posterior puede
+conservarse como diagnóstico, pero el par queda fuera de evidencia calificada y
+registra `EXIT_DELAYED`, instante de salida y segundos de retraso.
 Cobertura incompleta se informa; no se atribuyen MFE/MAE completos a trayectorias
 que empiezan tarde. No se hace backfill de order books usando velas.
 
@@ -91,6 +98,11 @@ pierde, ganancias protegidas=max(delta,0) cuando BASE gana, upside perdido=
 max(-delta,0); falsa emergencia=salida EMERGENCY con BASE neto>=0 y delta<0.
 Son contrafactuales con convención explícita, no una certeza causal. Se mantienen
 denominadores, número de pares cerrados, cobertura y motivos no evaluables.
+`arms` y `equity_curves` contienen exclusivamente pares con cobertura completa;
+`diagnostic_arms_all_observed` y `diagnostic_equity_curves_all_observed` conservan
+las trayectorias incompletas para diagnóstico sin mezclarlas con la comparación.
+Para varias salidas en el mismo snapshot, slippage se mide contra el mejor bid
+existente al llegar el grupo y captura el impacto acumulado al consumir niveles.
 Sin pares completos: métricas comparativas null, INSUFFICIENT_EVIDENCE.
 No declarar ventaja antes de 30 buckets completos y análisis prospectivo.
 
@@ -186,6 +198,9 @@ de fee y `research_stream=ERM_05M_INDEPENDENT`. Enlaza inmediatamente la captura
 para minimizar el retraso desde apertura. No lee ni escribe los artefactos
 acumulativos oficiales, no hace maduración/backfill de sus cohortes y sus
 resultados **no deben sumarse** a los contadores oficiales 05I/J/K.
+El fingerprint recorre las dependencias Python locales alcanzables desde 05I,
+05J, 05K y 05M, e incluye `requirements.txt` y `constraints.txt`. Si Top20,
+Top5 o el fingerprint fallan, no crea un directorio parcial de cohorte.
 Debe ejecutarse como proceso nuevo; credenciales privadas vacías y URL de DB
 en memoria antes de importar los adaptadores. No consulta ninguna base de datos.
 No modifica el scheduler ni instala un servicio. Prepararlo no inicia una captura.
@@ -195,3 +210,13 @@ Seguimiento GitHub verificado el 2026-09-07: scheduler run `34105460968`, evento
 05I=11/30, 05J=11/30, 05K=3/30; veredicto INSUFFICIENT_EVIDENCE. PR #47 y #50
 permanecen draft/sin merge. La fee verificada mantiene su fecha original,
 2026-09-04 18:47 UTC, y caduca el 2026-09-11 18:47 UTC; no se renovó su edad.
+
+## Correcciones posteriores a revisión
+
+La revisión adversarial de 05M añadió regresiones para spread amplio con mid por
+encima del stop pero VWAP liquidable por debajo, profundidad insuficiente, salida
+BASE una hora tarde, slippage de dos lotes consumiendo niveles distintos, métricas
+sin pares calificados, libros inválidos y dependencias transitivas. Verificación
+local posterior: 97 pruebas focales y 1056 pruebas completas aprobadas; compilación
+de los módulos 05M correcta. Las advertencias deprecadas del baseline permanecen
+fuera del alcance de esta fase.

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts.run_erm_05m_prospective import prepare_cohort, main
+from scripts.run_erm_05m_prospective import fingerprint, prepare_cohort, main
 from test_erm_05m import event
 from test_erm_05m_integration import source
 
@@ -32,7 +32,13 @@ def test_independent_cohort_fresh_dicts_provenance_and_no_official_artifact_writ
     assert state["research_stream"] == "ERM_05M_INDEPENDENT"
     assert state["official_05ijk_evidence"] is False
     manifest = json.loads((output / "manifest-05m.json").read_text(encoding="utf-8"))
-    assert len(manifest["frozen_files_sha256"]) == 5
+    frozen = manifest["frozen_files_sha256"]
+    for expected in ("backend/erm/replay.py", "backend/economia/ejecucion_paper.py",
+                     "backend/connectors/crypto/binance_public_market.py",
+                     "scripts/shadow_scanner_unified_05i.py",
+                     "scripts/shadow_strategy_execution_05k.py", "requirements.txt"):
+        assert expected in frozen
+    assert len(frozen) > 10
     assert not manifest["database_touched"] and not manifest["scanner_modified"]
     assert len(seen) == 2 and len(list(output.iterdir())) == 4
 
@@ -43,12 +49,22 @@ def test_incomplete_top20_does_not_create_entries(tmp_path):
     with pytest.raises(ValueError, match="TOP20"):
         prepare_cohort(tmp_path / "out", event()["fee"], observer=lambda *_: 0,
                        executor=no_execution, clock=lambda: 3600)
+    assert not (tmp_path / "out").exists()
 
 
 def test_failed_eligibility_cannot_fake_five_base_lots(tmp_path):
     with pytest.raises(ValueError, match="FIVE_EXECUTABLE"):
         prepare_cohort(tmp_path / "out", event()["fee"], observer=lambda *_: 20,
                        executor=lambda *_: (source(), {}), clock=lambda: 3600)
+    assert not (tmp_path / "out").exists()
+
+
+def test_fingerprint_covers_transitive_local_runtime_dependencies():
+    frozen = fingerprint()
+    assert "backend/erm/market.py" in frozen
+    assert "backend/economia/ejecucion_paper.py" in frozen
+    assert "backend/economia/fuentes.py" in frozen
+    assert "backend/connectors/crypto/binance_public_market.py" in frozen
 
 
 def test_invalid_fee_before_any_new_directory(tmp_path):

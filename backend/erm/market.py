@@ -26,6 +26,9 @@ class Features:
     volume_ratio: float | None = None
     slippage_bps: float | None = None
     reasons: list[str] = field(default_factory=list)
+    # VWAP obtainable by liquidating the full monitored quantity against bids.
+    # It is separate from mid so stops use an executable reference.
+    liquidation_vwap: float | None = None
 
 
 def validated_book(book):
@@ -61,6 +64,7 @@ def build_features(event, quantity, previous_spreads=()):
         fill = calcular_fill_venta(order_book=event["book"], base_quantity=quantity, fee_taker_bps_por_lado=0)
         if fill.completo:
             f.slippage_bps = float(fill.slippage_bps)
+            f.liquidation_vwap = float(fill.precio_vwap)
         else:
             f.reasons.append("INSUFFICIENT_DEPTH")
     except (ValueError, KeyError, TypeError, IndexError, ArithmeticError):

@@ -39,7 +39,14 @@ class Monitor:
         if f.price_fresh and f.price is not None and position.active:
             price = number(f.price, positive=True)
             position.mark(price)
-            hard = any(price <= lot.stop or lot.pnl(price) <= -lot.original_risk for lot in position.active)
+            # Prefer the full-position liquidation VWAP. Mid remains a fallback
+            # only when no executable book is available, such as an independent
+            # emergency price during degraded market-data operation.
+            liquidation = number(f.liquidation_vwap, positive=True) if f.liquidation_vwap is not None else price
+            hard = any(liquidation <= lot.stop or lot.pnl(liquidation) <= -lot.original_risk for lot in position.active)
+            # A valid book unable to liquidate this small PAPER position is
+            # market-risk evidence, not an invented price or a data fallback.
+            hard |= "INSUFFICIENT_DEPTH" in f.reasons
             hard |= number(portfolio_loss) >= 10
             hard |= self.trailing_stop is not None and f.price <= self.trailing_stop
         if hard:

@@ -18,6 +18,8 @@ INVARIANTS = dict(phase="05M", mode="SHADOW_ONLY", paper_capital_usdt=500,
                   database_touched=False, llm_called=False,
                   auto_promotion_allowed=False)
 
+EXIT_GRACE_SECONDS = 60
+
 
 def timestamp(value):
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -83,8 +85,9 @@ def _exit(lot, event):
         return None
 
 
-def _metrics(portfolio, curve):
-    closed = [lot for lot in portfolio.lots if not lot.remaining]
+def _metrics(portfolio, curve, lot_ids=None):
+    selected = [lot for lot in portfolio.lots if lot_ids is None or lot.id in lot_ids]
+    closed = [lot for lot in selected if not lot.remaining]
     losses = [float(lot.realized) for lot in closed if lot.realized < 0]
     peak, dd = 500., 0.
     for _, equity in curve:
@@ -96,10 +99,24 @@ def _metrics(portfolio, curve):
                 maximum_loss=min(losses) if losses else None,
                 mean_mae=statistics.mean(float(lot.mae) for lot in closed) if closed else None,
                 mean_mfe=statistics.mean(float(lot.mfe) for lot in closed) if closed else None,
-                fees_usdt=float(sum((lot.entry_fee + lot.exit_fees for lot in portfolio.lots), Decimal(0))),
-                slippage_usdt=float(sum((lot.entry_slippage_usd + lot.exit_slippage_usd for lot in portfolio.lots), Decimal(0))),
-                closed_lots=len(closed), open_lots=sum(bool(lot.remaining) for lot in portfolio.lots),
-                cash=float(portfolio.cash), equity=float(portfolio.equity))
+                fees_usdt=float(sum((lot.entry_fee + lot.exit_fees for lot in selected), Decimal(0))),
+                slippage_usdt=float(sum((lot.entry_slippage_usd + lot.exit_slippage_usd for lot in selected), Decimal(0))),
+                closed_lots=len(closed), open_lots=sum(bool(lot.remaining) for lot in selected),
+                cash=float(portfolio.cash if lot_ids is None else Decimal(500) + sum((lot.realized - lot.remaining_cost for lot in selected), Decimal(0))),
+                equity=float(portfolio.equity if lot_ids is None else Decimal(500) + sum((lot.pnl() for lot in selected), Decimal(0))))
+
+
+def _equity_curve(history, lot_ids):
+    """Build one comparable curve using only the requested lot trajectories."""
+    curve = []
+    for at, values, active, marks in history:
+        present = lot_ids.intersection(values)
+        if not present:
+            continue
+        active_symbols = {active[lot_id] for lot_id in present if lot_id in active}
+        if all(symbol in marks and at - marks[symbol] <= 60 for symbol in active_symbols):
+            curve.append((at, 500 + sum(values[lot_id] for lot_id in present)))
+    return curve
 
 
 def _consume_bids(event, quantity):
@@ -119,7 +136,7 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
     planned = import_base(source)
     base, erm = Portfolio(), Portfolio()
     monitors, spreads, pending, exits, audit = {}, {}, {}, {}, []
-    curves = {"BASE": [], "BASE_ERM": []}
+    histories = {"BASE": [], "BASE_ERM": []}
     inserted, last, coverage = set(), {}, {lot.id: {"first": None, "last": None, "samples": 0, "valid": 0, "warmup_samples": 0, "gaps": 0} for lot in planned}
     global_at = None
     marks = {}
@@ -164,6 +181,11 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
         # Complete prior virtual exit intentions before evaluating current snapshot.
         for portfolio, position, arm in ((base, basepos, "BASE"), (erm, pos, "BASE_ERM")):
             executable_event = copy.deepcopy(event)
+            arrival_best_bid = None
+            try:
+                arrival_best_bid = number(executable_event["book"]["bids"][0][0], positive=True)
+            except (KeyError, IndexError, TypeError, ValueError, ArithmeticError):
+                pass
             for lot in list(position.active):
                 intention = pending.get(lot.id) if arm == "BASE_ERM" else None
                 emergency_due = intention is not None and at > intention[0]
@@ -173,7 +195,8 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
                 if fill is None:
                     audit.append(dict(at=at, lot=lot.id, arm=arm, reason="EXIT_NOT_EXECUTABLE"))
                     continue
-                slip = max(Decimal(0), (fill.mejor_precio - fill.precio_vwap) * lot.remaining)
+                reference = arrival_best_bid if arrival_best_bid is not None else fill.mejor_precio
+                slip = max(Decimal(0), (reference - fill.precio_vwap) * lot.remaining)
                 _consume_bids(executable_event, lot.remaining)
                 portfolio.reduce(lot, lot.remaining, fill.precio_vwap, fill.fee_usd, at, slip)
                 if arm == "BASE_ERM":
@@ -207,15 +230,28 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
             spreads.setdefault(symbol, []).append(f.spread_bps)
             spreads[symbol] = spreads[symbol][-20:]
         for portfolio, arm in ((base, "BASE"), (erm, "BASE_ERM")):
-            active_symbols = [s for s, p in portfolio.positions.items() if p.active]
-            if all(s in marks and at - marks[s] <= 60 for s in active_symbols):
-                curves[arm].append((at, float(portfolio.equity)))
+            histories[arm].append((at,
+                                   {lot.id: float(lot.pnl()) for lot in portfolio.lots},
+                                   {lot.id: lot.symbol for lot in portfolio.lots if lot.remaining},
+                                   dict(marks)))
     pairs, complete_buckets = [], set()
     base_lots, erm_lots = {lot.id: lot for lot in base.lots}, {lot.id: lot for lot in erm.lots}
     for original in planned:
         c = coverage[original.id]
-        c["complete"] = bool(c["first"] is not None and c["first"] - original.opened <= 30 and c["last"] >= original.due - 30 and not c["gaps"] and c["valid"] == c["samples"])
         b, e = base_lots.get(original.id), erm_lots.get(original.id)
+        base_exit_at = float(b.closed) if b is not None and b.closed is not None else None
+        base_exit_delay = max(0., base_exit_at - original.due) if base_exit_at is not None else None
+        base_exit_within_grace = base_exit_delay is not None and base_exit_delay <= EXIT_GRACE_SECONDS
+        c["base_exit_at"] = base_exit_at
+        c["base_exit_delay_seconds"] = base_exit_delay
+        c["base_exit_within_grace"] = base_exit_within_grace
+        c["complete"] = bool(c["first"] is not None and c["first"] - original.opened <= 30
+                             and c["last"] >= original.due - 30 and not c["gaps"]
+                             and c["valid"] == c["samples"] and base_exit_within_grace)
+        if base_exit_delay is not None and not base_exit_within_grace:
+            audit.append(dict(at=base_exit_at, lot=original.id, arm="BASE", reason="EXIT_DELAYED",
+                              due=original.due, delay_seconds=base_exit_delay,
+                              allowed_delay_seconds=EXIT_GRACE_SECONDS))
         if b is None or e is None or b.remaining or e.remaining:
             continue
         delta = float(e.realized - b.realized)
@@ -232,15 +268,25 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
         if len(expected) == 5 and len(valid) == 5:
             complete_buckets.add(bucket)
     qualified = [pair for pair in pairs if pair["coverage_complete"]]
+    qualified_ids = {pair["lot"] for pair in qualified}
+    all_ids = {lot.id for lot in planned}
+    qualified_curves = {arm: _equity_curve(history, qualified_ids) for arm, history in histories.items()}
+    observed_curves = {arm: _equity_curve(history, all_ids) for arm, history in histories.items()}
     metrics = {key: sum(pair[key] for pair in qualified) if qualified else None for key in ("delta", "losses_avoided", "gains_protected", "lost_upside", "false_emergency")}
     return {**INVARIANTS, "status": "DIAGNOSTIC_ONLY" if len(complete_buckets) >= 30 else "INSUFFICIENT_EVIDENCE",
             "research_stream": source.get("research_stream", "BASE_SOURCE_SNAPSHOT"),
             "official_05ijk_evidence": False,
             "evidence_sources": sorted(evidence_sources),
             "complete_buckets": len(complete_buckets), "paired_closed_lots": len(pairs), "qualified_pairs": len(qualified),
-            "comparison": metrics, "arms": {"BASE": _metrics(base, curves["BASE"]), "BASE_ERM": _metrics(erm, curves["BASE_ERM"])},
+            "comparison": metrics,
+            "arms_scope": "QUALIFIED_PAIRS_ONLY",
+            "arms": {"BASE": _metrics(base, qualified_curves["BASE"], qualified_ids),
+                     "BASE_ERM": _metrics(erm, qualified_curves["BASE_ERM"], qualified_ids)},
+            "diagnostic_arms_all_observed": {"BASE": _metrics(base, observed_curves["BASE"]),
+                                             "BASE_ERM": _metrics(erm, observed_curves["BASE_ERM"])},
             "pairs": pairs, "coverage": coverage, "audit": audit,
             "positions": {"BASE": [p.snapshot() for p in base.positions.values()], "BASE_ERM": [p.snapshot() for p in erm.positions.values()]},
             "lots": {"BASE": [asdict(lot) for lot in base.lots], "BASE_ERM": [asdict(lot) for lot in erm.lots]},
-            "equity_curves": curves,
-            "limitations": ["Sampled drawdown and MAE/MFE, not tick-complete extrema", "Incomplete coverage is excluded from comparative totals", "REST receive time is not exchange event time", "No evidence of profitability or live authorization"]}
+            "equity_curves": qualified_curves,
+            "diagnostic_equity_curves_all_observed": observed_curves,
+            "limitations": ["Sampled drawdown and MAE/MFE, not tick-complete extrema", "Qualified arms and comparative totals exclude incomplete coverage", "All-observed arms are diagnostic only", "REST receive time is not exchange event time", "No evidence of profitability or live authorization"]}
