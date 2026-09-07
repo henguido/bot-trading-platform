@@ -1,0 +1,42 @@
+name: erm-05m-shadow-ci
+on:
+  push:
+    branches: [agent/erm-shadow-05m]
+  pull_request:
+    paths:
+      - 'backend/erm/**'
+      - 'scripts/shadow_emergency_risk_05m.py'
+      - 'tests/test_erm_05m*'
+      - '.github/workflows/erm-05m-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  TRADING_MODE: PAPER
+  ALLOW_LIVE_TRADING: ''
+  MODO_REAL: 'false'
+  INITIAL_CAPITAL_USD: '500'
+  LIMITE_ASIGNACION_POR_OPERACION: '0.02'
+  SECRET_KEY: synthetic-05m-ci-only
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install pinned dependencies
+        run: pip install -r backend/requirements.txt -r requirements-dev.txt -c constraints.txt
+      - name: Full offline regression suite
+        run: pytest -q --junitxml=erm-05m-tests.xml
+      - name: Compile shadow modules
+        run: python -m compileall -q backend/erm scripts/shadow_emergency_risk_05m.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: erm-05m-validation
+          path: erm-05m-tests.xml
+          if-no-files-found: error
