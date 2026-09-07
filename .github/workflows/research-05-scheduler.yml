@@ -1,0 +1,18 @@
+name: research-05-scheduler
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */4 * * *"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  run-prospective-shadow:
+    uses: henguido/bot-trading-platform/.github/workflows/research-05-prospective.yml@agent/bot-2.0-05a-profitability-paper
+    with:
+      source_ref: agent/bot-2.0-05a-profitability-paper
+      seed_run_id: "33986765071"
+    secrets: inherit
