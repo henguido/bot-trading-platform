@@ -9,8 +9,13 @@ on:
         required: false
         type: string
         default: ""
+      seed_run_id:
+        description: "Run previo usado solo para sembrar estado si el cache de la rama está vacío."
+        required: false
+        type: string
+        default: ""
   schedule:
-    # Desfasado del inicio de hora para reducir colisiones de runners.
+    # Este cron solo entra en vigor cuando el workflow existe en la rama por defecto.
     - cron: "17 */4 * * *"
   pull_request:
     branches:
@@ -27,6 +32,7 @@ on:
       - "tests/test_research_05_workflow.py"
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -92,6 +98,7 @@ jobs:
           fi
 
       - name: Restore cumulative shadow state
+        id: restore-shadow
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -100,6 +107,15 @@ jobs:
           key: research-05-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             research-05-state-
+
+      - name: Bootstrap state from prior evidence
+        if: steps.restore-shadow.outputs.cache-hit != 'true' && inputs.seed_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: research-05-${{ inputs.seed_run_id }}
+          path: artifacts
+          run-id: ${{ inputs.seed_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run 05I unified scanner shadow
         run: python scripts/shadow_scanner_unified_05i.py
