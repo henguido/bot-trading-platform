@@ -40,11 +40,16 @@ def import_base(source):
         fee, cost = number(row["entry_fee_usd"]), number(row["entry_quote_net"])
         if abs(qty * entry + fee - cost) > Decimal("0.000001") or cost > 10:
             raise ValueError("inconsistent source cost or 2% limit")
+        entry_slippage_bps = number(row["entry_slippage_bps"])
+        if entry_slippage_bps < 0:
+            raise ValueError("negative source slippage")
+        # 05K slippage is relative to best ask, not to the resulting VWAP.
+        entry_slippage = qty * entry - qty * entry / (1 + entry_slippage_bps / 10000)
         # Experimental stop, never written to 05K: 3% below actual fill.
         lot = Lot(key, row["symbol"], qty, entry, fee,
                   number(row["fee_taker_bps_por_lado"]), timestamp(row["opened_at"]),
                   timestamp(row["due_at"]), entry * Decimal(".97"), key,
-                  qty * entry * number(row["entry_slippage_bps"]) / 10000)
+                  entry_slippage)
         result.append(lot)
     return sorted(result, key=lambda lot: (lot.opened, lot.id))
 

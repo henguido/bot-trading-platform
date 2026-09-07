@@ -194,3 +194,11 @@ def test_restart_by_journal_replay_retains_identical_decisions_and_ledger():
     original = replay(source(), es)
     restored = replay(json.loads(json.dumps(source())), [json.loads(json.dumps(e)) for e in es])
     assert original == restored
+
+
+def test_entry_slippage_is_measured_from_best_ask_not_vwap():
+    from decimal import Decimal
+    src = source()
+    src["portfolios"]["BASE_05I"]["open_positions"][0]["entry_slippage_bps"] = 100
+    lot = import_base(src)[0]
+    assert lot.entry_slippage_usd == Decimal(9) - Decimal(9) / Decimal("1.01")
