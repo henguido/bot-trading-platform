@@ -234,6 +234,8 @@ def replay(source, events, *, erm_enabled=True, on_decision=None):
     qualified = [pair for pair in pairs if pair["coverage_complete"]]
     metrics = {key: sum(pair[key] for pair in qualified) if qualified else None for key in ("delta", "losses_avoided", "gains_protected", "lost_upside", "false_emergency")}
     return {**INVARIANTS, "status": "DIAGNOSTIC_ONLY" if len(complete_buckets) >= 30 else "INSUFFICIENT_EVIDENCE",
+            "research_stream": source.get("research_stream", "BASE_SOURCE_SNAPSHOT"),
+            "official_05ijk_evidence": False,
             "evidence_sources": sorted(evidence_sources),
             "complete_buckets": len(complete_buckets), "paired_closed_lots": len(pairs), "qualified_pairs": len(qualified),
             "comparison": metrics, "arms": {"BASE": _metrics(base, curves["BASE"]), "BASE_ERM": _metrics(erm, curves["BASE_ERM"])},

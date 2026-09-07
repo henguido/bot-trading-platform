@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/erm/**'
       - 'scripts/shadow_emergency_risk_05m.py'
+      - 'scripts/run_erm_05m_prospective.py'
       - 'tests/test_erm_05m*'
       - '.github/workflows/erm-05m-ci.yml'
   workflow_dispatch:
@@ -33,7 +34,7 @@ jobs:
       - name: Full offline regression suite
         run: pytest -q --junitxml=erm-05m-tests.xml
       - name: Compile shadow modules
-        run: python -m compileall -q backend/erm scripts/shadow_emergency_risk_05m.py
+        run: python -m compileall -q backend/erm scripts/shadow_emergency_risk_05m.py scripts/run_erm_05m_prospective.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

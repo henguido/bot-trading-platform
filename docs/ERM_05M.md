@@ -162,3 +162,36 @@ preexistentes), 66 tests propios tras revisar liquidez consumida, reinicio,
 estados y límites; compilación correcta. Los cambios posteriores de metadatos
 y cobertura warmup se verificaron otra vez con los 66 tests focales.
 Ver CI del commit final para la validación remota.
+
+## Continuación: readiness y cohorte independiente
+
+`--check-only` con `--source`, `--capture-seconds` y `--fee-evidence` hace
+preflight sin red ni escrituras. Devuelve `BLOCKED` (exit 2),
+`READY_DIAGNOSTIC_ONLY` o `READY_FULL_COVERAGE_POSSIBLE` (exit 0).
+Una cohorte vencida/futura, mezcla de lotes vencidos y activos, o fee inválida
+bloquea antes de crear archivos o consultar mercado. Entrada tardía, duración
+insuficiente o fee que vence antes del horizonte se reportan como diagnósticas.
+La captura vuelve a comprobarlo al iniciar y guarda el informe previo.
+
+Se preparó un arranque opcional para una cohorte **independiente**:
+
+```text
+python scripts/run_erm_05m_prospective.py --fee-evidence <fee.json> --output-dir <cohorte-nueva-05m> --capture-seconds 15000
+```
+
+Reutiliza las funciones existentes 05I/05K sin editar sus archivos: diccionarios
+nuevos en memoria, mismo Top20/Top5, mismo MotorRiesgo y horizonte. Exige 20
+candidatos y cinco lotes BASE ejecutables, guarda hashes del código, evidencia
+de fee y `research_stream=ERM_05M_INDEPENDENT`. Enlaza inmediatamente la captura
+para minimizar el retraso desde apertura. No lee ni escribe los artefactos
+acumulativos oficiales, no hace maduración/backfill de sus cohortes y sus
+resultados **no deben sumarse** a los contadores oficiales 05I/J/K.
+Debe ejecutarse como proceso nuevo; credenciales privadas vacías y URL de DB
+en memoria antes de importar los adaptadores. No consulta ninguna base de datos.
+No modifica el scheduler ni instala un servicio. Prepararlo no inicia una captura.
+
+Seguimiento GitHub verificado el 2026-09-07: scheduler run `34105460968`, evento
+`schedule`, success; restauró `research-05-state-34086697716-1`. Continuidad
+05I=11/30, 05J=11/30, 05K=3/30; veredicto INSUFFICIENT_EVIDENCE. PR #47 y #50
+permanecen draft/sin merge. La fee verificada mantiene su fecha original,
+2026-09-04 18:47 UTC, y caduca el 2026-09-11 18:47 UTC; no se renovó su edad.
