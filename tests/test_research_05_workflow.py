@@ -18,6 +18,14 @@ def test_workflow_05_corre_cada_4h_y_en_orden_05i_05j_05k():
     assert i < j < k < v
 
 
+def test_workflow_05_no_abre_un_segundo_linaje_acumulativo_por_pr():
+    texto = _texto()
+    assert "pull_request:" not in texto
+    assert "github.head_ref" not in texto
+    assert "workflow_call:" in texto
+    assert "workflow_dispatch:" in texto
+
+
 def test_workflow_05_es_fail_closed_en_paper_y_no_habilita_live():
     texto = _texto()
     assert "TRADING_MODE: PAPER" in texto
@@ -47,8 +55,6 @@ def test_workflow_05_declara_fee_manual_verificada_y_sus_disparadores():
     ) in texto
     assert 'RESEARCH_TAKER_FEE_VERIFIED_AT: "2026-09-04T18:47:00Z"' in texto
     assert "La validez temporal se verifica fail-closed dentro de Python." in texto
-    assert '"backend/economia/fee_verificada.py"' in texto
-    assert '"tests/test_fee_verificada_05k.py"' in texto
 
 
 def test_workflow_05_persiste_estado_y_publica_evidencia():
