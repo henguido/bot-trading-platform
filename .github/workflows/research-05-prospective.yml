@@ -108,8 +108,18 @@ jobs:
           restore-keys: |
             research-05-state-
 
+      - name: Detect restored shadow state
+        id: shadow-state
+        shell: bash
+        run: |
+          if [ -s artifacts/scanner-unified-shadow-05i-state.json ] && [ -s artifacts/strategy-execution-shadow-05k-state.json ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bootstrap state from prior evidence
-        if: steps.restore-shadow.outputs.cache-hit != 'true' && inputs.seed_run_id != ''
+        if: steps.shadow-state.outputs.available != 'true' && inputs.seed_run_id != ''
         uses: actions/download-artifact@v4
         with:
           name: research-05-${{ inputs.seed_run_id }}
