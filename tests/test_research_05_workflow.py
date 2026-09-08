@@ -62,3 +62,13 @@ def test_workflow_05_persiste_estado_y_publica_evidencia():
     assert "artifacts/research-05-status.txt" in texto
     assert "artifacts/research-05-verdict.json" in texto
     assert "retention-days: 30" in texto
+
+
+def test_workflow_05_no_pisa_cache_restaurado_con_seed_antigua():
+    texto = _texto()
+    assert "Detect restored shadow state" in texto
+    assert "id: shadow-state" in texto
+    assert "[ -s artifacts/scanner-unified-shadow-05i-state.json ]" in texto
+    assert "[ -s artifacts/strategy-execution-shadow-05k-state.json ]" in texto
+    assert "steps.shadow-state.outputs.available != 'true'" in texto
+    assert "steps.restore-shadow.outputs.cache-hit != 'true'" not in texto
