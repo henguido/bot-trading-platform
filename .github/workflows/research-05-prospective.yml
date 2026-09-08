@@ -17,19 +17,6 @@ on:
   schedule:
     # Este cron solo entra en vigor cuando el workflow existe en la rama por defecto.
     - cron: "17 */4 * * *"
-  pull_request:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/research-05-prospective.yml"
-      - "backend/economia/fee_verificada.py"
-      - "scripts/shadow_scanner_unified_05i.py"
-      - "scripts/analyze_scanner_challenger_05j.py"
-      - "scripts/shadow_strategy_execution_05k.py"
-      - "scripts/status_research_05.py"
-      - "scripts/verdict_research_05.py"
-      - "tests/test_fee_verificada_05k.py"
-      - "tests/test_research_05_workflow.py"
 
 permissions:
   actions: read
@@ -54,7 +41,6 @@ env:
 
 jobs:
   prospective-shadow:
-    if: github.event_name != 'pull_request' || github.head_ref == 'agent/bot-2.0-05a-profitability-paper'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
