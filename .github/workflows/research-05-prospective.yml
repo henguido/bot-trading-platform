@@ -75,12 +75,16 @@ jobs:
         run: |
           if [ -n "$BINANCE_API_KEY" ] && [ -n "$BINANCE_API_SECRET" ]; then
             echo "fee_source=BINANCE_ACCOUNT_AVAILABLE"
-          elif [ -n "$RESEARCH_TAKER_FEE_BPS" ] && [ -n "$RESEARCH_TAKER_FEE_SOURCE" ] && [ -n "$RESEARCH_TAKER_FEE_VERIFIED_AT" ]; then
-            echo "fee_source=MANUAL_VERIFIED_CANDIDATE"
-            echo "La validez temporal se verifica fail-closed dentro de Python."
           else
-            echo "fee_source=NO_DISPONIBLE"
-            echo "05I/05J continuaran con evidencia publica; 05K debe permanecer sin ejecucion neta cuando la fee sea desconocida."
+            python - <<'PY'
+          from backend.economia.fee_verificada import diagnosticar_fee_taker_manual
+
+          diagnostico = diagnosticar_fee_taker_manual()
+          estado = diagnostico["status"]
+          print(f"fee_source=MANUAL_{estado}")
+          if estado != "VERIFICADA":
+              print("05I/05J continuaran con evidencia publica; 05K no abrira entradas nuevas sin una fee verificable vigente.")
+          PY
           fi
 
       - name: Restore cumulative shadow state
