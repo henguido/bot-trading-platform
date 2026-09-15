@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+import re
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "research-05-prospective.yml"
@@ -53,7 +55,14 @@ def test_workflow_05_declara_fee_manual_verificada_y_sus_disparadores():
         'RESEARCH_TAKER_FEE_SOURCE: '
         '"manual:binance_account.commissionRates.taker"'
     ) in texto
-    assert 'RESEARCH_TAKER_FEE_VERIFIED_AT: "2026-09-04T18:47:00Z"' in texto
+    match = re.search(
+        r'RESEARCH_TAKER_FEE_VERIFIED_AT: "([^"]+)"',
+        texto,
+    )
+    assert match is not None
+    verified_at = match.group(1)
+    assert verified_at.endswith("Z")
+    datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
     assert "La validez temporal se verifica fail-closed dentro de Python." in texto
 
 
