@@ -12,7 +12,8 @@ Cubre:
   4. token expirado                         -> 401
   5. token valido                           -> 200
   6. token valido de un usuario inexistente -> 401
-  7. ningun caso devuelve 500
+  7. login/signup siguen publicos
+  8. hash/verify real de contrasena funciona con el conjunto reproducible
 """
 from datetime import datetime, timedelta
 
@@ -25,7 +26,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app import models
-from backend.app.auth import get_current_user, get_db
+from backend.app.auth import (
+    get_current_user,
+    get_db,
+    get_password_hash,
+    verify_password,
+)
 from backend.config import settings
 
 EMAIL_VALIDO = "usuario.prueba@ejemplo.com"
@@ -138,6 +144,17 @@ def test_token_valido_de_usuario_inexistente_devuelve_401(client):
 def test_login_y_signup_siguen_siendo_publicos(client):
     assert client.post("/login").status_code == 200
     assert client.post("/signup").status_code == 200
+
+
+# ── 8 ────────────────────────────────────────────────────────────────────────
+def test_hash_y_verify_de_contrasena_real_funcionan():
+    """Regresion del fallo passlib 1.7.4 + bcrypt 5.0.0 observado en Windows."""
+    password = "Clave-Prueba-2026!"
+    password_hash = get_password_hash(password)
+
+    assert password_hash != password
+    assert verify_password(password, password_hash) is True
+    assert verify_password("otra-clave", password_hash) is False
 
 
 # ── Config canonica ──────────────────────────────────────────────────────────

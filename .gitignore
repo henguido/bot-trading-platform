@@ -50,12 +50,33 @@ dist-ssr/
 *.local
 
 # ─────────────────────────────────────────────────────────────
-# Logs
+# Logs / estado local de ejecución
 # ─────────────────────────────────────────────────────────────
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.runtime/
+
+# ─────────────────────────────────────────────────────────────
+# Artefactos locales de investigación PAPER — nunca versionar estado vivo
+# ─────────────────────────────────────────────────────────────
+artifacts/profitability-probe-05a.json
+artifacts/profitability-shadow-05a-state.json
+artifacts/profitability-shadow-05a-summary.json
+artifacts/profitability-shadow-05a-diagnostics.json
+artifacts/scanner-alpha-shadow-05c-state.json
+artifacts/scanner-alpha-shadow-05c-summary.json
+artifacts/scanner-attribution-shadow-05d-state.json
+artifacts/scanner-attribution-shadow-05d-summary.json
+artifacts/edge-calibration-05f.json
+artifacts/scanner-bucket-attribution-05g.json
+artifacts/scanner-state-consistency-05h.json
+artifacts/scanner-unified-shadow-05i-state.json
+artifacts/scanner-unified-shadow-05i-summary.json
+artifacts/scanner-challenger-05j.json
+artifacts/strategy-execution-shadow-05k-state.json
+artifacts/strategy-execution-shadow-05k-summary.json
 
 # ─────────────────────────────────────────────────────────────
 # IDE / Sistema operativo

@@ -40,7 +40,7 @@ def importar(variables, extra=""):
                             "ALLOW_LIVE_TRADING", "MAX_DAILY_LOSS_USDT",
                             "MAX_DAILY_LOSS", "INITIAL_CAPITAL_USD", "WAIT_TIME",
                             "OPENAI_MODEL", "ACCESS_TOKEN_EXPIRE_MINUTES",
-                            "PERMITIR_BD_REMOTA_EN_DESARROLLO")}
+                            "PERMITIR_BD_REMOTA_EN_DESARROLLO", "CORS_ORIGINS")}
     entorno["PYTHONPATH"] = str(RAIZ)
     entorno.setdefault("SECRET_KEY", "clave-de-prueba-no-es-un-secreto-real")
     lineas = "\n".join(f"os.environ[{k!r}] = {v!r}" for k, v in variables.items())
@@ -104,9 +104,45 @@ def test_production_sin_database_url_falla():
 
 
 def test_production_con_database_url_arranca():
-    code, out, err = importar({"APP_ENV": "production", "DATABASE_URL": BD_REMOTA})
+    code, out, err = importar({
+        "APP_ENV": "production",
+        "DATABASE_URL": BD_REMOTA,
+        "CORS_ORIGINS": "https://frontend.test.invalid",
+    })
     assert code == 0, err
     assert "IMPORT_OK" in out
+
+
+def test_production_sin_cors_origins_falla_seguro():
+    code, out, err = importar({
+        "APP_ENV": "production",
+        "DATABASE_URL": BD_REMOTA,
+    })
+    assert code != 0
+    assert "IMPORT_OK" not in out
+    assert "CORS_ORIGINS" in err
+
+
+def test_cors_wildcard_se_rechaza():
+    code, out, err = importar({
+        "APP_ENV": "production",
+        "DATABASE_URL": BD_REMOTA,
+        "CORS_ORIGINS": "*",
+    })
+    assert code != 0
+    assert "IMPORT_OK" not in out
+    assert "CORS_ORIGINS" in err and "no admite *" in err
+
+
+def test_cors_multiples_origenes_se_parsean():
+    code, out, err = importar({
+        "APP_ENV": "production",
+        "DATABASE_URL": BD_REMOTA,
+        "CORS_ORIGINS": "https://uno.test.invalid, https://dos.test.invalid",
+    }, extra="print('CORS', s.CORS_ORIGINS)")
+    assert code == 0, err
+    assert "https://uno.test.invalid" in out
+    assert "https://dos.test.invalid" in out
 
 
 def test_app_env_invalido_falla():

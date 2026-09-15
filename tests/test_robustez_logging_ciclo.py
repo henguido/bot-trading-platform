@@ -209,7 +209,9 @@ def bucle_que_falla(monkeypatch):
         raise RuntimeError(f"{EMOJI} fallo del ciclo numero {intentos['n']}")
 
     monkeypatch.setattr(main, "cargar_contexto_usuario", contexto_que_falla)
-    monkeypatch.setattr(main.time, "sleep", lambda s: esperas.append(s))
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait",
+                        lambda s: (esperas.append(s), False)[1])
 
     def ejecutar(n=3):
         limite["n"] = n

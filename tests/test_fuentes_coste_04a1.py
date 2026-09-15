@@ -69,13 +69,15 @@ def test_get_available_assets_reutiliza_misma_peticion_de_cuenta(monkeypatch):
 
     activos, balances, info, costes = ac.get_available_assets(incluir_costes_cuenta=True)
 
-    assert cliente.account_calls == 1, "fee y balance deben salir del MISMO get_account"
+    assert cliente.account_calls == 1, "fees y balance deben salir del MISMO get_account"
     assert [a["symbol"] for a in activos] == ["BTCUSDT"]
     assert balances[0]["asset"] == "USDT"
     assert info == symbols
     assert costes == {
         "fee_taker_bps_por_lado": 10.0,
         "fuente_fee": "binance_account.commissionRates.taker",
+        "fee_maker_bps_por_lado": None,
+        "fuente_fee_maker": "NO_DISPONIBLE",
     }
 
 
@@ -122,6 +124,8 @@ def test_fallo_de_cuenta_no_borra_universo_publico(monkeypatch):
     assert balances == []
     assert costes["fee_taker_bps_por_lado"] is None
     assert costes["fuente_fee"] == "NO_DISPONIBLE"
+    assert costes["fee_maker_bps_por_lado"] is None
+    assert costes["fuente_fee_maker"] == "NO_DISPONIBLE"
 
 
 # ── Slippage por profundidad ────────────────────────────────────────────────
@@ -202,11 +206,35 @@ def test_order_book_es_una_sola_peticion_on_demand():
     assert op.metricas.n_elementos == 2
 
 
-def test_profundidad_no_esta_conectada_al_loop_ni_al_scanner():
+def test_profundidad_no_barre_universo_ni_scanner_y_paper_la_difiere():
     main = MAIN.read_text(encoding="utf-8")
     scanner = (RAIZ / "backend" / "scanner.py").read_text(encoding="utf-8")
-    assert "obtener_order_book" not in main
+    carteras = (RAIZ / "backend" / "portafolio" / "carteras.py").read_text(
+        encoding="utf-8"
+    )
+
+    # El scanner determinista continúa sin hacer ninguna petición de profundidad.
     assert "obtener_order_book" not in scanner
+
+    # Elegibilidad y barrido del universo siguen sin N+1 de order book.
+    bloque_universo = main.split("for asset in activos_evaluar:", 1)[1].split(
+        "print(gate.linea", 1
+    )[0]
+    assert "obtener_order_book" not in bloque_universo
+
+    # Delimitar por código ejecutable, no por comentarios: la guardia debe
+    # sobrevivir refactors de documentación sin perder su contrato.
+    bloque_scanner = main.split(
+        "resumen_scanner = scanner.ResumenScanner()", 1
+    )[1].split("if not activos_para_gpt:", 1)[0]
+    assert "obtener_order_book" not in bloque_scanner
+
+    # PAPER recibe un proveedor diferido; el book solo se pide dentro de
+    # ejecutar(), después de que el MotorRiesgo haya aprobado la operación.
+    assert "paper_order_book_provider" in main
+    assert "lambda symbol: obtener_order_book" in main
+    assert "book = self._obtener_book(symbol)" in carteras
+    assert "book = self._order_book_provider(symbol)" in carteras
 
 
 # ── Asignación del coste IA ─────────────────────────────────────────────────

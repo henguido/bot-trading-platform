@@ -510,7 +510,8 @@ def ciclo(monkeypatch):
     capital = {"v": 20.0}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
-    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)
     monkeypatch.setattr(ac.simulator, "positions", {}, raising=False)
 
     def contexto_falso():
@@ -697,10 +698,19 @@ def test_12d_un_contador_corrupto_no_altera_el_universo_enviado(ciclo, monkeypat
 
 
 def test_12e_el_gate_no_persiste_nada():
-    """03A no introduce migracion: la telemetria es en memoria."""
-    from backend.esquema import revision_esperada
-    assert revision_esperada() == "0005_telemetria_http"
-    assert not list((RAIZ / "migrations" / "versions").glob("0006*"))
+    """03A sigue puro; la migracion 0006 pertenece exclusivamente a PAPER."""
+    migracion_paper = RAIZ / "migrations" / "versions" / "0006_paper_ledger.py"
+    assert migracion_paper.exists()
+    texto = migracion_paper.read_text(encoding="utf-8").lower()
+    assert "paper" in texto
+    for termino in ("elegibilidad", "eligibility", "gate"):
+        assert termino not in texto
+
+    arbol = ast.parse(GATE.read_text(encoding="utf-8"))
+    importados = "\n".join(ast.dump(n) for n in ast.walk(arbol)
+                            if isinstance(n, (ast.Import, ast.ImportFrom)))
+    for prohibido in ("alembic", "sqlalchemy", "database", "models"):
+        assert prohibido not in importados.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

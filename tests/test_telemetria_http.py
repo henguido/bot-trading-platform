@@ -734,7 +734,7 @@ def test_noticias_cuenta_una_peticion_por_proveedor(monkeypatch):
     conector.api_key = AUTH_TOKEN_FALSO
     conector.newsapi_key = API_KEY_FALSA
 
-    def get_falso(url, params=None):
+    def get_falso(url, params=None, timeout=None):
         return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
                                json=lambda: {"results": [{"title": "t"}],
                                              "articles": [{"title": "a"}]})
@@ -755,7 +755,7 @@ def test_un_403_de_cryptopanic_se_cuenta_como_error(monkeypatch):
     conector = nc.NewsConnector()
     conector.api_key = AUTH_TOKEN_FALSO
 
-    def get_403(url, params=None):
+    def get_403(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"403 Client Error for url: {url}?auth_token={AUTH_TOKEN_FALSO}")
@@ -852,7 +852,7 @@ def test_el_auth_token_no_llega_a_consola_en_un_fallo(monkeypatch, capsys):
     conector = nc.NewsConnector()
     conector.api_key = AUTH_TOKEN_FALSO
 
-    def get_403(url, params=None):
+    def get_403(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"403 Client Error for url: {url}?auth_token={AUTH_TOKEN_FALSO}"
@@ -874,7 +874,7 @@ def test_la_apikey_de_newsapi_no_llega_a_consola(monkeypatch, capsys):
     conector = nc.NewsConnector()
     conector.newsapi_key = API_KEY_FALSA
 
-    def get_401(url, params=None):
+    def get_401(url, params=None, timeout=None):
         def revienta():
             raise requests_real.HTTPError(
                 f"401 Client Error for url: {url}?apiKey={API_KEY_FALSA}")
@@ -1068,13 +1068,13 @@ def test_el_numero_de_incrementos_de_ciclo_no_ha_cambiado():
 
 
 def test_el_scheduling_no_lo_toca_la_telemetria():
-    """Todo sleep del bucle sigue esperando exactamente settings.WAIT_TIME."""
+    """La espera cooperativa sigue usando exactamente settings.WAIT_TIME."""
     fn = _trading_loop_ast()
-    sleeps = [n for n in ast.walk(fn)
-              if isinstance(n, ast.Call)
-              and getattr(n.func, "attr", None) == "sleep"]
-    assert sleeps, "el bucle debe seguir esperando entre ciclos"
-    for nodo in sleeps:
+    waits = [n for n in ast.walk(fn)
+             if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", None) == "wait"]
+    assert waits, "el bucle debe seguir esperando entre ciclos"
+    for nodo in waits:
         assert len(nodo.args) == 1
         assert ast.dump(nodo.args[0]) == ast.dump(
             ast.parse("settings.WAIT_TIME", mode="eval").body), (
@@ -1130,7 +1130,8 @@ def bucle(monkeypatch, bd):
     limite = {"n": 4}
 
     monkeypatch.setattr(settings, "MODO_REAL", False)
-    monkeypatch.setattr(main.time, "sleep", lambda _s: None)
+    main.stop_trading.clear()
+    monkeypatch.setattr(main.stop_trading, "wait", lambda _s: False)
     # volcar() resuelve SessionLocal en el momento de llamar: basta parchear
     # el atributo del modulo para que la telemetria caiga en la BD de prueba.
     monkeypatch.setattr("backend.app.database.SessionLocal", bd)
@@ -1491,11 +1492,9 @@ def url_tmp(tmp_path):
     importlib.reload(settings)
 
 
-def test_0005_es_la_cabeza_y_encadena_con_0004():
-    from backend.esquema import revision_esperada
-
-    assert revision_esperada() == "0005_telemetria_http"
+def test_0005_declara_su_revision_y_encadena_con_0004():
     fuente = MIGRACION.read_text(encoding="utf-8")
+    assert 'revision = "0005_telemetria_http"' in fuente
     assert 'down_revision = "0004_telemetria"' in fuente
 
 
@@ -1534,7 +1533,7 @@ def test_0005_sobre_bd_con_datos_previos_solo_agrega(url_tmp):
         c.execute(sa.text("INSERT INTO usuarios (id,nombre,email,password_hash) "
                           "VALUES (1,'Prev','p@e.com','h')"))
 
-    command.upgrade(_alembic(url_tmp), "head")
+    command.upgrade(_alembic(url_tmp), "0005_telemetria_http")
 
     with engine.connect() as c:
         assert c.execute(sa.text(

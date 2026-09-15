@@ -19,17 +19,26 @@ RAIZ = Path(__file__).resolve().parents[1]
 
 # (archivo, ruta, ¿debe exigir autenticacion?)
 ENDPOINTS = [
-    ("backend/main.py",                        "/api/historial",           True),
-    ("backend/main.py",                        "/api/resumen",             True),
-    ("backend/main.py",                        "/login",                   False),
-    ("backend/main.py",                        "/signup",                  False),
+    ("backend/main.py",                        "/api/historial",             True),
+    ("backend/main.py",                        "/api/resumen",               True),
+    ("backend/main.py",                        "/login",                     False),
+    ("backend/main.py",                        "/signup",                    False),
     # Sonda de vida y liderazgo (P0-13). Publica a proposito: las sondas de
     # infraestructura no llevan token. No expone saldos, posiciones ni
     # transacciones; solo modo de ejecucion y quien lidera el bucle.
-    ("backend/main.py",                        "/health",                  False),
-    ("backend/routes/binance_routes.py",       "/balance",                 True),
+    ("backend/main.py",                        "/health",                    False),
+    ("backend/routes/binance_routes.py",       "/balance",                   True),
+    # Readiness resume postura operativa/configuracion. Aunque no expone
+    # detalles de checks ni secretos, sigue siendo diagnostico interno.
+    ("backend/routes/binance_routes.py",       "/api/readiness",             True),
     ("backend/routes/transacciones_routes.py", "/api/transacciones-reales", True),
-    ("backend/routes/historial_routes.py",     "/api/historial",           True),
+    # Expone diagnostico del embudo de decision del usuario (candidatos,
+    # rechazos, ejecuciones). Es dato operativo/financiero y debe quedar aislado.
+    ("backend/routes/transacciones_routes.py", "/api/decision-cycles",       True),
+    # El export contiene fills, costes y economia esperada del journal PAPER.
+    # Debe estar aislado por usuario igual que el historial financiero.
+    ("backend/routes/transacciones_routes.py", "/api/paper/journal/export",  True),
+    ("backend/routes/historial_routes.py",     "/api/historial",             True),
 ]
 
 METODOS = {"get", "post", "put", "delete", "patch"}

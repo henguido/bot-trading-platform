@@ -11,7 +11,7 @@ Ahora:
   - el arranque es explicito, desde el lifespan de FastAPI;
   - antes de arrancar hay que GANAR un candado de liderazgo;
   - arrancar dos veces en el mismo proceso no crea un segundo hilo;
-  - el apagado libera el candado.
+  - el apagado cooperativo espera al bucle antes de liberar el candado.
 
 CANDADOS
   CandadoPostgres  usa pg_try_advisory_lock sobre una conexion dedicada. Es el
@@ -144,17 +144,20 @@ class CoordinadorTrading:
     """
     Unico responsable de arrancar y detener el bucle. Idempotente: llamarlo
     varias veces no crea hilos adicionales.
+
+    Si se proporciona `stop_event`, el objetivo debe cooperar consultandolo o
+    esperando sobre el. El candado de liderazgo NO se libera mientras el hilo
+    siga vivo: es preferible fallar cerrado a permitir dos loops simultaneos.
     """
 
     def __init__(self, objetivo, candado=None, nombre="trading-loop",
-                 precondiciones=()):
+                 precondiciones=(), stop_event=None, stop_timeout=10.0):
         self._objetivo = objetivo
         self._candado = candado
         self._nombre = nombre
-        # Cada precondicion es un callable que devuelve (ok: bool, motivo: str).
-        # Se evaluan ANTES de pedir el candado: un proceso que no puede operar
-        # no debe retener el liderazgo y bloquear a otro que si podria.
         self._precondiciones = tuple(precondiciones)
+        self._stop_event = stop_event
+        self._stop_timeout = float(stop_timeout)
         self._hilo = None
         self._mutex = threading.Lock()
         self.es_lider = False
@@ -168,10 +171,8 @@ class CoordinadorTrading:
         """Devuelve True si este proceso quedo como lider y el bucle corre."""
         with self._mutex:
             if self.activo:
-                return True                     # ya somos lider: no duplicar
+                return True
 
-            # Fallo cerrado: si una precondicion no se cumple, no se opera.
-            # Se comprueba antes del candado para no retener el liderazgo.
             for verificar in self._precondiciones:
                 ok, motivo = verificar()
                 if not ok:
@@ -188,6 +189,9 @@ class CoordinadorTrading:
                 print(f"[COORDINADOR] {self.motivo_inactivo}. Este proceso NO operara.")
                 return False
 
+            if self._stop_event is not None:
+                self._stop_event.clear()
+
             self.es_lider = True
             self.motivo_inactivo = ""
             self._hilo = threading.Thread(target=self._objetivo, name=self._nombre,
@@ -196,11 +200,28 @@ class CoordinadorTrading:
             print(f"[COORDINADOR] Liderazgo obtenido. Bucle '{self._nombre}' iniciado.")
             return True
 
-    def detener(self) -> None:
+    def detener(self) -> bool:
+        """Solicita parada y solo libera liderazgo cuando el hilo termino."""
         with self._mutex:
+            hilo = self._hilo
+            if self._stop_event is not None:
+                self._stop_event.set()
+
+        if (hilo is not None and hilo.is_alive()
+                and hilo is not threading.current_thread()):
+            hilo.join(timeout=self._stop_timeout)
+
+        with self._mutex:
+            if hilo is not None and hilo.is_alive():
+                self.es_lider = True
+                self.motivo_inactivo = "detencion pendiente: hilo aun activo"
+                print("[COORDINADOR] Hilo aun activo; liderazgo retenido por seguridad.")
+                return False
+
             self._hilo = None
             self.es_lider = False
             self.motivo_inactivo = "detenido"
             if self._candado is not None:
                 self._candado.liberar()
             print("[COORDINADOR] Liderazgo liberado.")
+            return True

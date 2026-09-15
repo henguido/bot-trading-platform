@@ -48,7 +48,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Optional
 
 # Clave usada en `status_counts` cuando la peticion termino pero el codigo HTTP
@@ -57,6 +57,11 @@ SIN_STATUS = "SIN_STATUS"
 
 PROVEEDOR_INTERNO = "interno"
 OPERACION_FASE_PRE_LLM = "fase_pre_llm"
+
+
+def _utc_naive() -> datetime:
+    """UTC sin zona para conservar el contrato actual de persistencia."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def nuevo_ciclo_id() -> str:
@@ -383,12 +388,12 @@ class OperacionHttp:
 
     def _abrir(self) -> None:
         if self.metricas.inicio is None:
-            self.metricas.inicio = datetime.utcnow()
+            self.metricas.inicio = _utc_naive()
             self._t0 = time.perf_counter()
 
     def _cerrar(self) -> None:
         try:
-            self.metricas.fin = datetime.utcnow()
+            self.metricas.fin = _utc_naive()
             if self._t0 is not None:
                 self.metricas.duracion_ms = max(
                     0, int((time.perf_counter() - self._t0) * 1000))
@@ -452,7 +457,7 @@ class MedidorCicloHttp:
                  ciclo_num: Optional[int] = None):
         self.ciclo_id = ciclo_id or nuevo_ciclo_id()
         self.ciclo_num = ciclo_num
-        self._inicio_dt = datetime.utcnow()
+        self._inicio_dt = _utc_naive()
         self._inicio_perf = time.perf_counter()
         self._operaciones: Dict[tuple, OperacionHttp] = {}
         # Se marca SOLO tras un commit correcto: un volcado fallido debe poder
@@ -477,7 +482,7 @@ class MedidorCicloHttp:
         try:
             op = self.operacion(PROVEEDOR_INTERNO, OPERACION_FASE_PRE_LLM)
             op.metricas.inicio = self._inicio_dt
-            op.metricas.fin = datetime.utcnow()
+            op.metricas.fin = _utc_naive()
             op.metricas.duracion_ms = max(
                 0, int((time.perf_counter() - self._inicio_perf) * 1000))
             op.elementos(n_activos)

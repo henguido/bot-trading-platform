@@ -111,6 +111,7 @@ def test_produccion_no_necesita_archivo_env(tmp_path):
         "DATABASE_URL": "postgresql://u:p@host-produccion.invalid:5432/x",
         "SECRET_KEY": "clave-produccion-sintetica-solo-para-prueba-123456789",
         "INITIAL_CAPITAL_USD": "321",
+        "CORS_ORIGINS": "https://frontend.test.invalid",
     }
 
     r = _importar(raiz, raiz, extra_env=extra)

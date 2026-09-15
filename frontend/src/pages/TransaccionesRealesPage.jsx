@@ -1,23 +1,30 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { getTransaccionesReales } from "../services/api";
 
 const TransaccionesRealesPage = () => {
+  const navigate = useNavigate();
   const [transacciones, setTransacciones] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/transacciones-reales")
-      .then((res) => res.json())
+    getTransaccionesReales()
       .then((data) => {
-        setTransacciones(data);
-        setLoading(false);
+        setTransacciones(Array.isArray(data) ? data : []);
+        setError("");
       })
       .catch((err) => {
-        console.error("Error cargando transacciones reales:", err);
-        setLoading(false);
-      });
-  }, []);
+        if (err.status === 401) {
+          navigate("/login");
+          return;
+        }
+        setError(err.message || "Error cargando transacciones reales");
+      })
+      .finally(() => setLoading(false));
+  }, [navigate]);
 
   return (
     <div className="p-4">
@@ -26,6 +33,8 @@ const TransaccionesRealesPage = () => {
         <CardContent className="overflow-auto p-4">
           {loading ? (
             <p>Cargando...</p>
+          ) : error ? (
+            <p className="text-red-600">{error}</p>
           ) : (
             <Table>
               <TableHeader>

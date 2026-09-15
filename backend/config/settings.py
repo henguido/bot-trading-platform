@@ -138,6 +138,16 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 # a la fase de optimizacion de IA, posterior a main.
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-2024-08-06').strip() or 'gpt-4o-2024-08-06'
 
+# Motor que genera decisiones. GPT conserva el comportamiento historico;
+# SAFE_NO_TRADE mantiene el proceso operativo sin llamar IA ni abrir compras.
+# El futuro motor determinista se añadira como opcion solo tras validacion OOS.
+DECISION_ENGINES_VALIDOS = ('GPT', 'SAFE_NO_TRADE')
+DECISION_ENGINE = os.getenv('DECISION_ENGINE', 'GPT').strip().upper() or 'GPT'
+if DECISION_ENGINE not in DECISION_ENGINES_VALIDOS:
+    raise RuntimeError(
+        f"DECISION_ENGINE={DECISION_ENGINE!r} no es valido. Usa uno de: "
+        f"{', '.join(DECISION_ENGINES_VALIDOS)}")
+
 # Timeout de red para las llamadas al LLM. Unidad: SEGUNDOS.
 # Antes no habia ninguno: una peticion colgada bloqueaba el hilo de trading
 # indefinidamente, sin ciclo, sin logs y con el kill switch inoperante.
@@ -184,13 +194,32 @@ else:
     print("[PAPER] Modo simulacion - no se enviara ninguna orden real.")
 
 # Capital inicial del libro PAPER. Unidad: USDT. Solo se usa con MODO_REAL=False.
-INITIAL_CAPITAL_USD = _leer_float('INITIAL_CAPITAL_USD', 20.0, minimo=0.0)
+DEFAULT_INITIAL_CAPITAL_USD = 500.0
+INITIAL_CAPITAL_USD = _leer_float('INITIAL_CAPITAL_USD', DEFAULT_INITIAL_CAPITAL_USD, minimo=0.0)
 if INITIAL_CAPITAL_USD <= 0:
     raise RuntimeError("INITIAL_CAPITAL_USD debe ser un numero positivo")
 
 # 🌍 Configuración del servidor FastAPI
 API_HOST = "0.0.0.0"
 API_PORT = 8000
+
+# Origins permitidos para el frontend. Con credenciales no se acepta wildcard.
+# En desarrollo el frontend Vite local funciona sin configurar nada; en
+# produccion la lista debe definirse explicitamente para evitar un despliegue
+# que parezca sano pero bloquee todas las peticiones del navegador.
+_cors_default = "" if ES_PRODUCCION else "http://localhost:5173"
+_cors_raw = os.getenv("CORS_ORIGINS", _cors_default)
+CORS_ORIGINS = tuple(
+    origin.strip() for origin in _cors_raw.split(",") if origin.strip()
+)
+if not CORS_ORIGINS:
+    raise RuntimeError(
+        "CORS_ORIGINS debe contener al menos un origen permitido. "
+        "En produccion es obligatorio definirlo explicitamente.")
+if "*" in CORS_ORIGINS:
+    raise RuntimeError(
+        "CORS_ORIGINS no admite * porque la API usa credenciales/JWT; "
+        "define origenes explicitos separados por coma.")
 
 # 🛡️ Seguridad (para frontend privado en el futuro)
 SECURE_DASHBOARD = False
@@ -246,8 +275,10 @@ MONTO_MAXIMO_USDT = _leer_float('MONTO_MAXIMO_USDT', 20.0, minimo=0.0)
 
 # Fraccion del capital disponible asignable a UNA operacion. Unidad: fraccion 0..1.
 # Sustituye conceptualmente a RISK_PER_TRADE, que se acepta como alias.
+DEFAULT_LIMITE_ASIGNACION_POR_OPERACION = 0.02
 LIMITE_ASIGNACION_POR_OPERACION = _leer_float(
-    'LIMITE_ASIGNACION_POR_OPERACION', 0.1, minimo=0.0, maximo=1.0, alias='RISK_PER_TRADE')
+    'LIMITE_ASIGNACION_POR_OPERACION', DEFAULT_LIMITE_ASIGNACION_POR_OPERACION,
+    minimo=0.0, maximo=1.0, alias='RISK_PER_TRADE')
 
 # Alias historico. Mismo valor; conservado solo para no romper referencias.
 RISK_PER_TRADE = LIMITE_ASIGNACION_POR_OPERACION
