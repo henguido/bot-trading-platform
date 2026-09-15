@@ -37,7 +37,7 @@ env:
   SECRET_KEY: research-05-only-synthetic-secret-key-2026
   RESEARCH_TAKER_FEE_BPS: "10.0"
   RESEARCH_TAKER_FEE_SOURCE: "manual:binance_account.commissionRates.taker"
-  RESEARCH_TAKER_FEE_VERIFIED_AT: "2026-09-04T18:47:00Z"
+  RESEARCH_TAKER_FEE_VERIFIED_AT: "2026-09-15T16:34:50Z"
 
 jobs:
   prospective-shadow:
